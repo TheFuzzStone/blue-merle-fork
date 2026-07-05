@@ -1,0 +1,235 @@
+#!/bin/sh
+#
+# Interactive CLI for changing the Mudi's IMEI. See also the toggle-driven
+# workflow in /usr/bin/blue-merle-switch-stage{1,2} and the LuCI view.
+
+# Serialize with any other blue-merle invocation that touches the modem
+# (LuCI SIM-swap, toggle stages). Concurrent access to /dev/ttyUSB3 mixes
+# AT command streams and can leave the modem in an inconsistent state.
+#
+# NOTE 1: earlier versions used `exec flock -n ... || {...}` which was
+# broken — exec replaces the shell, so the || fallback message was
+# unreachable when flock failed to acquire the lock.
+#
+# NOTE 2: without -E, `flock -n` returns exit code 1 both on lock
+# contention AND when the child script exits with 1 (e.g. user
+# answered 'n' to the SIM-swap prompt). That collision made us print
+# the "another operation in progress" message on every rejected
+# prompt. -E lets us pick a distinct code (99) exclusively for the
+# contention case, so the child's own non-zero exits pass through
+# transparently.
+LOCK=/tmp/blue-merle-cli.lock
+if [ "${BLUE_MERLE_LOCKED:-}" != "1" ]; then
+	export BLUE_MERLE_LOCKED=1
+	if ! flock -n -E 99 "$LOCK" "$0" "$@"; then
+		rc=$?
+		if [ "$rc" = "99" ]; then
+			echo "Another blue-merle operation is in progress. Try again shortly." >&2
+		fi
+		exit "$rc"
+	fi
+	exit 0
+fi
+
+. /lib/blue-merle/functions.sh
+
+# Resolve the modem's AT-command TTY (see _resolve_modem_tty in
+# functions.sh). Falls back gracefully if the port has shifted after a
+# firmware update or USB re-enumeration; can be overridden by exporting
+# BLUE_MERLE_TTY before invocation.
+BLUE_MERLE_TTY=$(_resolve_modem_tty)
+if [ ! -c "$BLUE_MERLE_TTY" ]; then
+	echo "Error: no modem TTY found (expected $BLUE_MERLE_TTY)."
+	echo "Please reboot and contact the maintainer if the problem persists."
+	exit 1
+fi
+export BLUE_MERLE_TTY
+
+echo -n "Swap SIM card and update IMEI? (Y/n): "
+read -r answer
+case $answer in
+	n*|N*) answer=0;;
+	*) answer=1;;
+esac
+if [ "$answer" -eq 0 ]; then
+	exit 1
+fi
+
+
+echo "Disabling the ME from both transmitting and receiving RF signals..."
+
+old_imei=$(READ_IMEI)
+old_imsi=$(READ_IMSI)
+
+answer=1
+while [ "$answer" -eq 1 ]; do
+	if gl_modem AT AT+CFUN=4 | grep -q OK; then
+		answer=0
+	else
+		echo -n "...failed. Try again? (Y/n): "
+		read -r reply
+		case $reply in
+			n*|N*) exit 1 ;;
+		esac
+	fi
+done
+
+# CFUN=4 is asynchronous; give the modem a moment to fully release RF before
+# writing EGMR. Otherwise the new IMEI may collide with a pending network
+# attach using the old IMEI.
+sleep 2
+
+## We have just disabled the modem so it should not log on to any network.
+## We set a random IMEI now only to have it overwritten very soon after
+## the SIM card has been replaced. We intend to prevent an accidential
+## leak of the new SIM's IMSI with the old IMEI just in case the modem
+## accidentally tried to log in to the network.
+if ! python3 /lib/blue-merle/imei_generate.py -r; then
+	echo "WARNING: interim IMEI set failed; the modem may still hold the old IMEI."
+fi
+
+
+echo -n "Please now replace the SIM card and press any key to continue. "
+read -r answer
+
+leak=0
+max_cfun_retries=30
+
+cfun0_tries=0
+until gl_modem AT AT+CFUN=0 | grep -q OK
+do
+	cfun0_tries=$((cfun0_tries+1))
+	if [ "$cfun0_tries" -ge "$max_cfun_retries" ]; then
+		echo "CFUN=0 failed after $max_cfun_retries attempts; aborting."
+		exit 1
+	fi
+	sleep 1
+	echo "CFUN=0 failed. Trying again. ($cfun0_tries/$max_cfun_retries)"
+done
+
+cfun4_tries=0
+until gl_modem AT AT+CFUN=4 | grep -q OK
+do
+	leak=1
+	cfun4_tries=$((cfun4_tries+1))
+	if [ "$cfun4_tries" -ge "$max_cfun_retries" ]; then
+		echo "CFUN=4 failed after $max_cfun_retries attempts; aborting."
+		exit 1
+	fi
+	sleep 1
+	echo "CFUN=4 failed. Trying again. ($cfun4_tries/$max_cfun_retries)"
+done
+
+if [ "$leak" -eq 1 ]; then
+	echo
+	echo "WARNING: Reset took longer than expected."
+	echo
+fi
+
+sleep 2
+
+new_imsi=$(READ_IMSI)
+
+if [ -z "$new_imsi" ]; then
+	echo
+	echo "WARNING: No SIM detected after swap. Insert a SIM before proceeding."
+	echo
+elif [ "$old_imsi" = "$new_imsi" ]; then
+	echo
+	echo "WARNING: Old IMSI equals new IMSI. Did you actually swap the SIM?"
+	echo
+fi
+
+echo -n "Would you like to set a random (r) or deterministic (d) IMEI? (R/d): "
+read -r answer
+case $answer in
+	d*|D*) answer=0;;
+	*) answer=1;;
+esac
+if [ "$answer" -eq 1 ]; then
+	python3 /lib/blue-merle/imei_generate.py -r
+else
+	python3 /lib/blue-merle/imei_generate.py -d
+fi
+
+new_imei=$(READ_IMEI)
+
+if [ "$old_imei" = "$new_imei" ]; then
+	echo
+	echo "WARNING: Old IMEI equals new IMEI."
+	echo
+else
+	# Detect the modem-imei sysfs shim path dynamically (used to be hardcoded
+	# to /tmp/modem.1-1.2 which depends on USB enumeration).
+	modem_dir=$(ls -d /tmp/modem.*/ 2>/dev/null | head -n1)
+	if [ -z "$modem_dir" ]; then
+		modem_dir=/tmp/modem.1-1.2/
+		mkdir -p "$modem_dir"
+	fi
+	printf '%s' "$new_imei" > "${modem_dir%/}/modem-imei"
+	# Prevent IMEI leak via the eSIM LPA. /root/esim is expected to be a
+	# tmpfs mount (see /etc/init.d/blue-merle-esim-tmpfs) so the IMEI never
+	# touches flash.
+	if [ -d /root/esim ]; then
+		printf '%s' "$new_imei" > /root/esim/imei
+		# On tmpfs, shred is theatrical: overwriting pages doesn't defeat
+		# the kernel's page cache. Just remove the file.
+		[ -f /root/esim/log.txt ] && rm -f /root/esim/log.txt
+	fi
+fi
+
+echo "You should now reset the modem or shutdown the device."
+echo "For extra privacy, you should shutdown the device and change your location."
+echo
+echo -n "Would you like to shutdown the device (s) or reset the modem (m)? (S/m): "
+read -r answer
+case $answer in
+	m*|M*) answer=0;;
+	*) answer=1;;
+esac
+# Wipe sensitive variables before we hand control back to the user or shut
+# down: nothing further needs them and they should not linger in shell
+# process memory.
+unset old_imei new_imei old_imsi new_imsi
+if [ "$answer" -eq 1 ]; then
+    if [ -c /dev/ttyS0 ]; then
+        echo '{ "msg": "Shutting down..." }' > /dev/ttyS0
+        echo '{ "poweroff": "1" }' > /dev/ttyS0
+    else
+        /sbin/poweroff
+    fi
+else
+	echo "Resetting modem..."
+	# AT+CFUN=1,1 performs a full reset (equivalent to power cycle) and keeps
+	# the modem reachable afterwards. AT+QPOWD would power the modem OFF and
+	# then AT+CIMI could never succeed, leading to an infinite wait loop.
+	reset_attempts=0
+	until gl_modem AT "AT+CFUN=1,1" | grep -q OK
+	do
+		reset_attempts=$((reset_attempts+1))
+		if [ "$reset_attempts" -ge 10 ]; then
+			echo "Resetting modem failed 10 times; aborting."
+			exit 1
+		fi
+		echo "Resetting modem failed. Trying again."
+		sleep 1
+	done
+
+	time_start=$(date +%s)
+	timeout_sec=60
+	until imsi=$(gl_modem AT AT+CIMI | grep -w -E "[0-9]{6,15}")
+	do
+		time_now=$(date +%s)
+		elapsed=$((time_now-time_start))
+		if [ "$elapsed" -ge "$timeout_sec" ]; then
+			echo
+			echo "Modem did not come back within ${timeout_sec}s; aborting."
+			exit 1
+		fi
+		echo -ne "Waiting for reset to complete. (${elapsed}s/${timeout_sec}s)\r"
+		sleep 1
+	done
+	echo
+	echo "FIN"
+fi
+	

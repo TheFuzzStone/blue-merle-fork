@@ -1,0 +1,147 @@
+#!/bin/sh
+
+. /lib/blue-merle/functions.sh
+. /lib/functions/gl_util.sh
+
+# Resolve modem TTY once at start and pass it to every child (in
+# particular imei_generate.py). Without this the Python side would
+# fall back to /dev/ttyUSB3 and silently fail on shifted enumerations.
+BLUE_MERLE_TTY=$(_resolve_modem_tty)
+export BLUE_MERLE_TTY
+
+rm -f /tmp/blue-merle-stage1
+
+# Load the *real* original IMEI/IMSI captured in stage1. These live on tmpfs
+# so they never touch flash and are wiped on shutdown/reboot.
+if [ -r /tmp/blue-merle/original-imei ]; then
+	old_imei=$(cat /tmp/blue-merle/original-imei)
+else
+	old_imei=""
+fi
+if [ -r /tmp/blue-merle/original-imsi ]; then
+	old_imsi=$(cat /tmp/blue-merle/original-imsi)
+else
+	old_imsi=""
+fi
+
+mcu_send_message "Switch pulled.  Continuing..."
+sleep 1
+sim_switch on
+
+leak=0
+max_cfun_retries=30
+
+cfun0_tries=0
+until gl_modem AT AT+CFUN=0 | grep -q OK
+do
+	cfun0_tries=$((cfun0_tries+1))
+	if [ "$cfun0_tries" -ge "$max_cfun_retries" ]; then
+		mcu_send_message "ERROR:          CFUN=0 failed. Aborting."
+		sleep 3
+		# Continue anyway so we still write a random IMEI and power off
+		# rather than leave the device in an undefined state.
+		break
+	fi
+	mcu_send_message "CFUN=0 failed. Trying again."
+	sleep 1
+done
+
+cfun4_tries=0
+until gl_modem AT AT+CFUN=4 | grep -q OK
+do
+	leak=1
+	cfun4_tries=$((cfun4_tries+1))
+	if [ "$cfun4_tries" -ge "$max_cfun_retries" ]; then
+		mcu_send_message "ERROR:          CFUN=4 failed. Aborting."
+		sleep 3
+		break
+	fi
+	mcu_send_message "CFUN=4 failed. Trying again."
+	sleep 1
+done
+
+if [ "$leak" -eq 1 ]; then
+	mcu_send_message "WARNING:        Reset took longer than expected."
+	sleep 3
+fi
+
+sleep 1
+
+new_imsi=$(READ_IMSI)
+
+# Compare against the *real* pre-swap IMSI saved by stage1 (loaded above).
+# If they are equal AND non-empty, the user probably forgot to swap the SIM.
+# We also warn on an empty new_imsi (SIM not detected).
+if [ -z "$new_imsi" ]; then
+	mcu_send_message "WARNING:        No SIM detected. Insert a SIM and toggle again."
+	sleep 3
+elif [ -n "$old_imsi" ] && [ "$old_imsi" = "$new_imsi" ]; then
+	mcu_send_message "WARNING:        Old IMSI equals new IMSI. Did you swap the SIM?"
+	sleep 3
+fi
+
+mcu_send_message "Setting random  IMEI"
+if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r; then
+	mcu_send_message "ERROR:          IMEI change failed. Reboot and retry."
+	sleep 5
+	# Fall through to shutdown regardless: leaving the device up with an
+	# unknown IMEI state is worse than powering off.
+fi
+
+new_imei=$(READ_IMEI)
+
+# Give the modem a moment to settle after EGMR before comparing.
+sleep 1
+
+if [ -n "$new_imei" ] && [ -n "$old_imei" ] && [ "$old_imei" = "$new_imei" ]; then
+	mcu_send_message "WARNING:        Old IMEI equals new IMEI."
+	sleep 3
+else
+	# The MCU display cannot show the IMEI without leaking it on a serial
+	# link. Show only a confirmation that a change occurred.
+	mcu_send_message "IMEI changed.   Powering off."
+	sleep 3
+	# Determine the modem sysfs path dynamically instead of hardcoding
+	# /tmp/modem.1-1.2 (which depends on the USB enumeration).
+	modem_dir=$(ls -d /tmp/modem.*/ 2>/dev/null | head -n1)
+	if [ -z "$modem_dir" ]; then
+		modem_dir=/tmp/modem.1-1.2/
+		mkdir -p "$modem_dir"
+	fi
+	printf '%s' "$new_imei" > "${modem_dir%/}/modem-imei"
+	# Prevent IMEI leak via the eSIM LPA. /root/esim is now a tmpfs mount
+	# (see /etc/init.d/blue-merle-esim-tmpfs), so this value lives only in
+	# RAM and is wiped on shutdown.
+	if [ -d /root/esim ]; then
+		printf '%s' "$new_imei" > /root/esim/imei
+		[ -f /root/esim/log.txt ] && rm -f /root/esim/log.txt
+	fi
+fi
+
+# Log only the event, never the IMEI/IMSI values themselves.
+logger -p notice -t blue-merle-toggle "IMEI change completed (values omitted)"
+
+# Wipe sensitive variables before proceeding to shutdown so they cannot be
+# scraped from process memory in the seconds before poweroff.
+unset old_imei new_imei old_imsi new_imsi
+rm -f /tmp/blue-merle/original-imei /tmp/blue-merle/original-imsi
+
+
+mcu_send_message "The device will shutdown now."
+sleep 3
+mcu_send_message "You should      change your     location before booting again."
+sleep 5
+
+
+i=5
+until [ "$i" -eq 0 ]
+do
+        i=$((i-1))
+        mcu_send_message "Shutting down... ($i)"
+        sleep 1
+done
+
+logger -p notice -t blue-merle-toggle "Finished with Stage 2"
+
+# Note: calling /sbin/poweroff directly results in the device rebooting into a broken state
+echo '{ "poweroff": "1" }' >/dev/ttyS0

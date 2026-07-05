@@ -1,0 +1,54 @@
+# Apple, Inc. OUI prefixes (first 3 octets of MAC address).
+#
+# These are real, IEEE-registered Apple OUIs. Presenting a MAC from
+# this list makes Mudi's radio identity look like a genuine Apple
+# device (iPhone / iPad / MacBook / AirPods) to any DHCP server or
+# WiFi tracker doing vendor lookup.
+#
+# Trade-offs (see LOCAL_CHANGES.md for the full note):
+#   + Matches the iPhone/iPad hostname we advertise.
+#   + Avoids the "locally-administered bit set" flag that WIDS
+#     systems interpret as "randomized/spoofed MAC".
+#   - Not RFC 7844-compliant (that RFC recommends U/L=1).
+#   - Small chance of colliding with a real Apple device in the same
+#     LAN. If that happens on your uplink, remove the offending OUI
+#     from this list or fall back to blue-merle-newmac --uplink to
+#     regenerate.
+#
+# Format: one OUI per line, lowercase hex, colon-separated, no
+# trailing colon. Comments and blank lines are ignored.
+#
+# You may add/remove entries; changes take effect at next boot or
+# after `service blue-merle reload`.
+
+# --- Common current Apple OUIs (post-2018 hardware) ---
+3c:22:fb
+f0:d1:a9
+88:66:5a
+a0:99:9b
+14:7d:da
+d0:81:7a
+04:cf:8c
+b8:8d:12
+c8:2a:14
+34:12:98
+6c:8d:c1
+a4:83:e7
+78:7b:8a
+d0:03:4b
+9c:04:eb
+54:26:96
+b0:19:c6
+7c:6d:62
+40:83:1d
+28:cf:e9
+14:99:e2
+9c:35:eb
+5c:f5:da
+50:ed:3c
+f0:b4:29
+0c:74:c2
+70:cd:60
+8c:85:90
+bc:52:b7
+80:e6:50

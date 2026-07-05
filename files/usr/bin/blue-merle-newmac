@@ -1,0 +1,181 @@
+#!/bin/sh
+#
+# Regenerate the Mudi's outward-facing MAC addresses without a reboot.
+#
+# Use this before (or after) connecting to a new upstream network in
+# repeater mode so consecutive uplinks cannot be linked by a stable MAC.
+#
+# What is randomized:
+#   * network.@device[1].macaddr           — MAC seen by clients on the AP.
+#   * glconfig.general.macclone_addr       — MAC advertised to the upstream
+#                                            WiFi network (repeater mode).
+#   * network.@device[0].macaddr (br-lan)  — Ethernet-side MAC (if present).
+#   * both wireless.@wifi-iface[*].macaddr — BSSIDs the AP broadcasts.
+#
+# Usage:
+#   blue-merle-newmac                # regenerate MACs (Apple OUIs) + restart
+#   blue-merle-newmac --uplink       # only regenerate glconfig.macclone_addr
+#                                      (fastest; keeps AP clients connected)
+#   blue-merle-newmac --pure-random  # use RFC-7844 locally-administered MAC
+#                                      instead of an Apple OUI
+#   blue-merle-newmac --dry-run      # print the new values but do not apply
+#   blue-merle-newmac --hostname     # also rotate the hostname
+#   blue-merle-newmac --ssid         # also rotate the SSID
+#   blue-merle-newmac --full         # rotate MAC + hostname + SSID
+#                                      (equivalent to --hostname --ssid)
+#
+# Exits 0 on success, non-zero on failure.
+
+# AGENTS.md convention: prefer explicit error checks over `set -e`.
+# The busybox ash + `set -e` combination is brittle around |grep -q|
+# and `uci -q ... || true` idioms used throughout this script; a
+# single stray grep miss would abort mid-flight. `set -u` alone
+# catches undefined-variable typos without that risk.
+set -u
+
+. /lib/blue-merle/functions.sh
+
+MODE=all
+DRY_RUN=0
+GEN=APPLE_MAC_GEN
+ROTATE_HOSTNAME=0
+ROTATE_SSID=0
+
+for arg in "$@"; do
+    case "$arg" in
+        --uplink) MODE=uplink ;;
+        --dry-run) DRY_RUN=1 ;;
+        --pure-random) GEN=UNICAST_MAC_GEN ;;
+        --hostname) ROTATE_HOSTNAME=1 ;;
+        --ssid) ROTATE_SSID=1 ;;
+        --full) ROTATE_HOSTNAME=1; ROTATE_SSID=1 ;;
+        -h|--help)
+            sed -n 's/^# \{0,1\}//p' "$0" | sed -n '3,28p'
+            exit 0
+            ;;
+        *)
+            echo "unknown option: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
+new_mac() { "$GEN"; }
+
+if [ "$DRY_RUN" = "1" ]; then
+    echo "Would set (not applied, dry-run, generator=$GEN):"
+    if [ "$MODE" = "all" ]; then
+        printf '  wireless.@wifi-iface[0].macaddr = %s\n' "$(new_mac)"
+        printf '  wireless.@wifi-iface[1].macaddr = %s\n' "$(new_mac)"
+        printf '  network.@device[0].macaddr     = %s\n' "$(new_mac)"
+        printf '  network.@device[1].macaddr     = %s\n' "$(new_mac)"
+    fi
+    printf '  glconfig.general.macclone_addr  = %s\n' "$(new_mac)"
+    if [ "$ROTATE_HOSTNAME" = "1" ]; then
+        echo "  (hostname would also be rotated by RANDOMIZE_HOSTNAME)"
+    fi
+    if [ "$ROTATE_SSID" = "1" ]; then
+        echo "  (SSID would also be rotated by RANDOMIZE_SSID)"
+    fi
+    exit 0
+fi
+
+echo "Generating new MAC address(es) with $GEN..."
+
+if [ "$MODE" = "all" ]; then
+    if [ "$GEN" = "APPLE_MAC_GEN" ]; then
+        # RESET_BSSIDS / RANDOMIZE_MACADDR already use APPLE_MAC_GEN.
+        RESET_BSSIDS
+        RANDOMIZE_MACADDR
+    else
+        # Explicit RFC-7844 mode: rebuild the same uci writes with
+        # UNICAST_MAC_GEN so we bypass the Apple OUI list entirely.
+        uci set wireless.@wifi-iface[0].macaddr="$(UNICAST_MAC_GEN)"
+        uci -q set wireless.@wifi-iface[1].macaddr="$(UNICAST_MAC_GEN)" 2>/dev/null || true
+        uci set network.@device[1].macaddr="$(UNICAST_MAC_GEN)"
+        uci set glconfig.general.macclone_addr="$(UNICAST_MAC_GEN)"
+        uci -q set network.@device[0].macaddr="$(UNICAST_MAC_GEN)" 2>/dev/null || true
+        uci commit wireless
+        uci commit network
+        uci commit glconfig
+    fi
+    if [ "$ROTATE_HOSTNAME" = "1" ]; then
+        RANDOMIZE_HOSTNAME
+        /etc/init.d/system reload 2>/dev/null || true
+    fi
+    if [ "$ROTATE_SSID" = "1" ]; then
+        RANDOMIZE_SSID
+    fi
+    echo "Restarting wifi and network..."
+    wifi reload
+    /etc/init.d/network restart
+    echo
+    echo "Done. Clients will need to reconnect (BSSID changed)."
+    echo "New MAC visible to upstream: $(uci get glconfig.general.macclone_addr)"
+    if [ "$ROTATE_HOSTNAME" = "1" ]; then
+        echo "New hostname:                $(uci get system.@system[0].hostname)"
+    fi
+    if [ "$ROTATE_SSID" = "1" ]; then
+        echo "New SSID:                    $(uci get wireless.@wifi-iface[0].ssid)"
+    fi
+else
+    # Uplink-only: keep BSSIDs stable so already-connected AP clients
+    # stay online, but rotate the repeater-facing MAC and re-attach
+    # to the upstream network.
+    #
+    # Historically this ran `/etc/init.d/network restart`, which on
+    # GL.iNet firmwares also cycles the wlan interfaces and thus
+    # drops AP clients — the exact thing --uplink is supposed to
+    # avoid. Instead, only bounce the upstream logical interface
+    # (typically 'wwan' on repeater builds, 'wan' on wired uplink)
+    # so netifd re-attaches with the freshly-committed macaddr.
+    uci set glconfig.general.macclone_addr="$(new_mac)"
+    uci commit glconfig
+    if [ "$ROTATE_HOSTNAME" = "1" ]; then
+        RANDOMIZE_HOSTNAME
+        /etc/init.d/system reload 2>/dev/null || true
+    fi
+    if [ "$ROTATE_SSID" = "1" ]; then
+        # SSID change with --uplink still forces AP clients to
+        # reconnect; document that explicitly.
+        echo "Note: --ssid with --uplink still kicks AP clients."
+        RANDOMIZE_SSID
+        wifi reload
+    fi
+
+    # Discover which upstream logical interface exists and bounce
+    # only that one. `ifdown/ifup` are the correct primitives here:
+    # they operate on netifd's logical interfaces, not on wlan
+    # devices, so AP-side clients are unaffected.
+    _bounced=0
+    for _iface in wwan wan; do
+        if ubus -S call network.interface."$_iface" status >/dev/null 2>&1; then
+            echo "Bouncing upstream interface '$_iface'..."
+            ifdown "$_iface" 2>/dev/null || true
+            # A brief settle window lets netifd finish teardown so
+            # the fresh ifup picks up the new macaddr rather than
+            # racing the pending state change.
+            sleep 1
+            ifup "$_iface" 2>/dev/null || true
+            _bounced=1
+            break
+        fi
+    done
+    if [ "$_bounced" = "0" ]; then
+        # Neither wwan nor wan exists — the user may have a custom
+        # interface name. Fall back to the historical behaviour and
+        # warn so they know why AP clients might have blinked.
+        echo "Warning: no wwan/wan interface found; falling back to full network restart." >&2
+        echo "         Set a custom interface via env if needed." >&2
+        /etc/init.d/network restart
+    fi
+
+    echo
+    echo "Done. New MAC visible to upstream: $(uci get glconfig.general.macclone_addr)"
+    if [ "$ROTATE_HOSTNAME" = "1" ]; then
+        echo "New hostname:                      $(uci get system.@system[0].hostname)"
+    fi
+    if [ "$ROTATE_SSID" = "1" ]; then
+        echo "New SSID:                          $(uci get wireless.@wifi-iface[0].ssid)"
+    fi
+fi

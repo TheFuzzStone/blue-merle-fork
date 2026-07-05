@@ -1,0 +1,48 @@
+#!/bin/sh
+#
+# Rotate the AP BSSID when a wireless interface goes DOWN.
+#
+# The previous version of this hook triggered on ifup and had an
+# off-by-one bug: it wrote a new BSSID into UCI *after* wifi had
+# already come up with the old one, so the new value only became
+# visible at the NEXT wifi reload. Users who did the typical
+# "change location → wifi reload" flow ended up still broadcasting
+# the previous BSSID.
+#
+# Switching to ifdown fixes the timing: when wifi goes down we
+# write the new BSSID to UCI, then the immediately-following ifup
+# (netifd usually re-brings up right after) picks up the fresh
+# value. No recursion risk either, since ifdown does not trigger
+# ifdown.
+
+[ "$ACTION" = "ifdown" ] || exit 0
+
+# $DEVICE is set by netifd; wireless devices go down as
+# wlan0/wlan1 (or client-mode names). Filter to wireless only.
+case "$DEVICE" in
+    wlan*|wlp*|phy*) ;;
+    *) exit 0 ;;
+esac
+
+# Serialize with any other blue-merle write to /etc/config/wireless.
+LOCK=/tmp/blue-merle-rerandom.lock
+
+# Run synchronously so that when netifd fires the matching ifup right
+# after this ifdown (typical during `wifi reload`), the fresh BSSID is
+# already committed to /etc/config/wireless. An earlier version used
+# `&` to fire-and-forget, but RESET_BSSIDS (two uci sets + a commit +
+# one APPLE_MAC_GEN python invocation ≈ 500 ms on MIPS) could easily
+# be beaten to the punch by the follow-up ifup, and the ifup handler
+# would then read stale UCI — reintroducing the off-by-one bug the
+# ifdown rewrite was meant to fix.
+#
+# netifd handles per-interface hotplug scripts serially so the extra
+# half-second of blocking is confined to the wlan pathway and cannot
+# stall unrelated network events.
+(
+    flock -n 9 || exit 0
+    . /lib/blue-merle/functions.sh
+    RESET_BSSIDS
+    logger -p notice -t blue-merle \
+        "Refreshed BSSIDs (uci) after ifdown of $DEVICE — next ifup will use them"
+) 9>"$LOCK"

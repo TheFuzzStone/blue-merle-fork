@@ -1,0 +1,82 @@
+#!/bin/sh /etc/rc.common
+
+# The eSIM Local Profile Assistant (LPA) reads /root/esim/imei to know which
+# IMEI to advertise for profile enablement. PR #63 upstream started writing
+# the *new* IMEI there to prevent the LPA from leaking the *old* IMEI, but
+# that means the IMEI now lives on flash in cleartext across reboots — the
+# exact forensic artifact blue-merle is supposed to erase.
+#
+# Solution: mount a tmpfs over /root/esim on boot, so LPA still reads and
+# writes the file (from RAM), but nothing survives poweroff.
+#
+# We must run before any service that touches the eSIM LPA. The GL.iNet
+# eSIM stack starts fairly late; priority 8 puts us ahead of network (20)
+# and the LPA daemon.
+
+START=8
+STOP=98
+
+ESIM_DIR=/root/esim
+
+start() {
+    # If a previous instance already mounted tmpfs on /root/esim, leave it.
+    # Use /proc/mounts instead of `mountpoint -q` — busybox on stock Mudi
+    # firmware does not ship `mountpoint` (util-linux), and the missing
+    # command spams the boot log with "mountpoint: not found" warnings.
+    if grep -q " ${ESIM_DIR} " /proc/mounts; then
+        return 0
+    fi
+
+    mkdir -p "$ESIM_DIR"
+
+    # 1. Preserve any pre-existing config that lives on flash in
+    #    /root/esim (e.g. LPA profile database) into RAM so we can
+    #    restore it under the tmpfs.
+    tmpstash=$(mktemp -d)
+    if [ -d "$ESIM_DIR" ] && [ -n "$(ls -A "$ESIM_DIR" 2>/dev/null)" ]; then
+        cp -a "$ESIM_DIR"/. "$tmpstash"/ 2>/dev/null || true
+    fi
+
+    # 2. CRITICAL: delete the sensitive flash-side files *before* the
+    #    tmpfs mount. Otherwise the flash originals (in particular
+    #    imei/log.txt written by an earlier upstream install per
+    #    PR #63) survive under the mountpoint and remain visible to
+    #    forensic analysis whenever the tmpfs is not mounted.
+    #
+    #    We only remove privacy-sensitive names, not the whole
+    #    directory, so LPA-provisioned profile databases (which are
+    #    functional data, not identifiers) are preserved via the
+    #    tmpstash above.
+    rm -f "$ESIM_DIR/imei"    2>/dev/null || true
+    rm -f "$ESIM_DIR/log.txt" 2>/dev/null || true
+
+    mount -t tmpfs -o mode=0700,size=1M tmpfs "$ESIM_DIR"
+
+    # 3. Restore preserved contents into the tmpfs. Anything sensitive
+    #    that we deleted in step 2 will start empty on tmpfs; the LPA
+    #    can re-populate it as needed and it dies with the RAM.
+    if [ -n "$(ls -A "$tmpstash" 2>/dev/null)" ]; then
+        cp -a "$tmpstash"/. "$ESIM_DIR"/ 2>/dev/null || true
+        # Sensitive files that we deleted from flash must not be
+        # re-materialized from the stash either.
+        rm -f "$ESIM_DIR/imei"    2>/dev/null || true
+        rm -f "$ESIM_DIR/log.txt" 2>/dev/null || true
+    fi
+    rm -rf "$tmpstash"
+
+    chmod 700 "$ESIM_DIR"
+}
+
+stop() {
+    # Overwrite volatile file contents in RAM before unmounting so that the
+    # kernel is more likely to free the pages. (On tmpfs this is best-effort
+    # since the kernel decides when to reclaim.)
+    if grep -q " ${ESIM_DIR} " /proc/mounts; then
+        find "$ESIM_DIR" -type f -exec sh -c '
+            for f; do
+                : > "$f" 2>/dev/null || true
+            done
+        ' _ {} + 2>/dev/null || true
+        umount "$ESIM_DIR" 2>/dev/null || umount -l "$ESIM_DIR" 2>/dev/null
+    fi
+}

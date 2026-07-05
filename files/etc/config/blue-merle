@@ -1,0 +1,25 @@
+# blue-merle runtime configuration.
+#
+# Edit with `uci` (recommended) or directly, then run:
+#     service blue-merle reload
+# for the changes to take effect. Boot-time rotation always reads
+# this file fresh.
+#
+# All options live in the 'main' section (config main 'main').
+
+config main 'main'
+	# option stable_identity 0
+	#
+	#     0 (default): rotate hostname / BSSID / SSID / MACs at
+	#                  every boot. Best against session linkage
+	#                  across locations.
+	#     1          : leave hostname, BSSID, SSID and client MACs
+	#                  ALL alone across reboots — you'll get one
+	#                  truly stable Apple-style identity until you
+	#                  manually run `blue-merle-newmac --full`.
+	#                  Best against targeted detection of the
+	#                  masquerade itself (a real iPhone doesn't
+	#                  rotate its MAC or SSID every boot either).
+	#
+	# See README.md § "Threat-model tradeoff" for the reasoning.
+	option stable_identity '0'

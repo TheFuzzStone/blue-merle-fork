@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# When the upstream WiFi (repeater) or WAN interface comes up, rotate the
+# MAC that Mudi presents to the upstream network. Without this, two
+# consecutive connections to different hotspots would see the same MAC and
+# could correlate the sessions.
+#
+# GL.iNet's repeater interface is typically called "wwan" (netifd) and is
+# backed by wlan0-1 or similar. We also handle "wan" (Ethernet uplink).
+# We do NOT touch the AP-side MACs here — that would kick connected clients
+# offline on every uplink change.
+#
+# Note on timing: this runs on ifup. When the user selects a new repeater
+# network in LuCI, netifd tears down the old wwan and brings up a new one;
+# the new one has already been created with the previous macclone_addr, so
+# the new MAC we set here will only take effect on the *next* ifup (i.e.
+# reconnection to that same or a different hotspot). To get a fresh MAC
+# immediately, use `blue-merle-newmac --uplink` before selecting a
+# repeater network.
+
+[ "$ACTION" = "ifup" ] || exit 0
+
+# Only react to upstream-facing interfaces.
+case "$INTERFACE" in
+    wwan|wan|wwan_*|wan_*) ;;
+    *) exit 0 ;;
+esac
+
+LOCK=/tmp/blue-merle-uplink-mac.lock
+
+# Fire-and-forget in the background so netifd is not blocked.
+(
+    flock -n 9 || exit 0
+    . /lib/blue-merle/functions.sh
+    # Use an Apple OUI so the MAC matches the iPhone/iPad hostname we
+    # advertise via DHCP. Falls back to UNICAST_MAC_GEN inside
+    # APPLE_MAC_GEN if /lib/blue-merle/apple-oui.txt is missing.
+    NEW_MAC=$(APPLE_MAC_GEN)
+    uci set glconfig.general.macclone_addr="$NEW_MAC"
+    uci commit glconfig
+    logger -p notice -t blue-merle "Rotated upstream macclone_addr after ifup of $INTERFACE"
+) 9>"$LOCK" &

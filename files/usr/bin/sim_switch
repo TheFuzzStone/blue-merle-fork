@@ -1,0 +1,10 @@
+#!/bin/sh
+#
+# Write the SIM-change switch state to the tmpfs marker consulted by
+# CHECK_ABORT in functions.sh. Any argument other than "on" is treated
+# as "off" (defensive default).
+
+case "$1" in
+    on)  printf 'on\n'  > /tmp/sim_change_switch ;;
+    *)   printf 'off\n' > /tmp/sim_change_switch ;;
+esac

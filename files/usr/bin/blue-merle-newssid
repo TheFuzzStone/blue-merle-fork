@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# Rotate the AP SSID to a fresh "<Name>'s iPhone" without a reboot.
+#
+# The Wi-Fi password is *not* touched: clients only need to click
+# "Connect" on the new network and re-enter the same password they
+# used before.
+#
+# Usage:
+#   blue-merle-newssid              # rotate SSID and reload wifi
+#   blue-merle-newssid --dry-run    # preview the next SSID without applying
+#   blue-merle-newssid --preview    # show the current SSID and exit
+#
+# Exits 0 on success, non-zero on failure.
+
+set -eu
+
+. /lib/blue-merle/functions.sh
+
+MODE=apply
+
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) MODE=dry ;;
+        --preview) MODE=preview ;;
+        -h|--help)
+            sed -n 's/^# \{0,1\}//p' "$0" | sed -n '3,16p'
+            exit 0
+            ;;
+        *)
+            echo "unknown option: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
+current=$(uci -q get wireless.@wifi-iface[0].ssid || echo "<unset>")
+
+case "$MODE" in
+    preview)
+        echo "Current SSID: $current"
+        exit 0
+        ;;
+    dry)
+        # Compose a candidate exactly the way RANDOMIZE_SSID does, but
+        # do not write anything.
+        names_file=${BLUE_MERLE_US_NAMES:-/lib/blue-merle/us-first-names.txt}
+        name=$(_pick_random_line "$names_file") || {
+            echo "Cannot read $names_file" >&2
+            exit 1
+        }
+        echo "Current SSID:  $current"
+        echo "Would set SSID: ${name}'s iPhone"
+        exit 0
+        ;;
+esac
+
+echo "Rotating SSID (current: $current)..."
+RANDOMIZE_SSID
+new=$(uci -q get wireless.@wifi-iface[0].ssid || echo "<unset>")
+echo "Reloading wifi..."
+wifi reload
+
+echo
+echo "Done. New SSID: $new"
+echo "Clients must click 'Connect' on the new network — the password is"
+echo "unchanged, so they can reuse the one they were already using."

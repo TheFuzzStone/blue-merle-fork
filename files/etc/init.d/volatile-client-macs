@@ -1,0 +1,62 @@
+#!/bin/sh /etc/rc.common
+
+# The gl_clients daemon stores MAC addresses of connected clients in a
+# SQLite database at /etc/oui-tertf/client.db. On flash this creates a
+# persistent log of every device that ever associated to the Mudi — a
+# forensic artifact blue-merle is supposed to erase.
+#
+# We solve this by mounting a tmpfs over /etc/oui-tertf so the database
+# lives only in RAM and is wiped on poweroff.
+#
+# Ordering:
+#   * We must run before gl-tertf (60) and gl_clients (99).
+#   * We should run early enough that no service has opened the db yet
+#     (that is why the package's preinst also stops gl_clients before we
+#     take over on first install).
+
+START=9
+STOP=99
+
+CLIENT_DB_DIR=/etc/oui-tertf
+CLIENT_DB=$CLIENT_DB_DIR/client.db
+
+start() {
+    # Idempotent: if we're already mounted, nothing to do.
+    # Use /proc/mounts instead of `mountpoint -q` — busybox on stock
+    # Mudi firmware does not ship `mountpoint` (util-linux).
+    if grep -q " ${CLIENT_DB_DIR} " /proc/mounts; then
+        return 0
+    fi
+
+    mkdir -p "$CLIENT_DB_DIR"
+
+    # Preserve the current db (if any) into a temp buffer so that the
+    # tmpfs starts with the same content the daemon expects. On a fresh
+    # install /etc/oui-tertf may be empty — that's fine.
+    stash=$(mktemp -d)
+    if [ -f "$CLIENT_DB" ]; then
+        cp -a "$CLIENT_DB" "$stash/client.db" 2>/dev/null || true
+        # Just rm — shred is theatre on NAND (wear leveling + FTL
+        # indirection mean overwrites land in new cells while the old
+        # ones remain readable via chip-off), so it only creates a
+        # false sense of security. See AGENTS.md for the policy.
+        rm -f "$CLIENT_DB"
+    fi
+
+    mount -t tmpfs -o mode=0755,size=1M tmpfs "$CLIENT_DB_DIR"
+
+    if [ -f "$stash/client.db" ]; then
+        cp -a "$stash/client.db" "$CLIENT_DB"
+    fi
+    rm -rf "$stash"
+}
+
+stop() {
+    # We are being explicitly stopped (uninstall or reload). Truncate
+    # the in-RAM db and unmount. `rm` is the right primitive on tmpfs;
+    # `shred` is meaningless on RAM-backed filesystems.
+    if grep -q " ${CLIENT_DB_DIR} " /proc/mounts; then
+        rm -f "$CLIENT_DB"
+        umount "$CLIENT_DB_DIR" 2>/dev/null || umount -l "$CLIENT_DB_DIR" 2>/dev/null
+    fi
+}

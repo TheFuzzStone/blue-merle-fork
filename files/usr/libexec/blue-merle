@@ -1,0 +1,74 @@
+#!/bin/sh
+#
+# Thin RPC-style entry point invoked from the LuCI view via fs.exec().
+# Each subcommand maps to one of the shell helpers in functions.sh.
+#
+# NOTE: this executable is exposed to any web user with the
+# luci-app-blue-merle ACL, so we keep the surface strictly enumerated
+# — no dispatch via $2, no wildcarding.
+
+. /lib/blue-merle/functions.sh
+
+# Resolve modem TTY once and export it so imei_generate.py (invoked
+# from the random-imei branch) uses the same port as the rest of the
+# package instead of its hard-coded default.
+BLUE_MERLE_TTY=$(_resolve_modem_tty)
+export BLUE_MERLE_TTY
+
+show_message() {
+    # There is mcu_send_message() in /lib/functions/gl_util.sh but we
+    # don't want to load the whole file (it is heavy and pulls in a
+    # bunch of GL SDK helpers).
+    [ -c /dev/ttyS0 ] || return 0
+    printf '{"msg":"%s"}\n' "$1" > /dev/ttyS0
+}
+
+# Log the event (not the value): the timestamp and command name are the
+# useful thing to see in `logread` while debugging, and *do not* include
+# any identifiers that could be correlated with an operator's records.
+logger -p notice -t blue-merle-libexec "libexec invoked: ${1:-<none>}"
+
+case "$1" in
+    read-imei)
+        imei=$(READ_IMEI) || { echo "No IMEI found" >&2; exit 1; }
+        # Mask the middle of the IMEI on the MCU screen so a shoulder-
+        # surfer / photograph does not immediately capture the full
+        # identifier. The full value is still returned on stdout to LuCI.
+        masked="${imei:0:6}******${imei:12}"
+        show_message "IMEI: $masked"
+        printf '%s' "$imei"
+        ;;
+
+    read-imsi)
+        imsi=$(READ_IMSI) || { echo "No IMSI found" >&2; exit 1; }
+        masked="${imsi:0:5}******${imsi:11}"
+        show_message "IMSI: $masked"
+        printf '%s' "$imsi"
+        ;;
+
+    random-imei)
+        flock -n /tmp/blue-merle-imei-generate.lock \
+            timeout 15 python3 /lib/blue-merle/imei_generate.py --random \
+            || { echo "IMEI change failed" >&2; exit 1; }
+        READ_IMEI
+        ;;
+
+    shutdown-modem)
+        exec gl_modem AT AT+CFUN=4
+        ;;
+
+    shutdown)
+        show_message "Shutting down..."
+        printf 'Shutting down'
+        if [ -c /dev/ttyS0 ]; then
+            printf '{"poweroff":"1"}\n' > /dev/ttyS0
+        else
+            /sbin/poweroff
+        fi
+        ;;
+
+    *)
+        echo "unknown subcommand: ${1:-<none>}" >&2
+        exit 2
+        ;;
+esac

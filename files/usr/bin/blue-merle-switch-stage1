@@ -1,0 +1,113 @@
+#!/bin/sh
+
+. /lib/blue-merle/functions.sh
+. /lib/functions/gl_util.sh
+
+# Resolve modem TTY once at start and pass it to every child (in
+# particular imei_generate.py). Without this the Python side would
+# fall back to /dev/ttyUSB3 and silently fail on shifted enumerations.
+BLUE_MERLE_TTY=$(_resolve_modem_tty)
+export BLUE_MERLE_TTY
+
+if [ ! -f "/tmp/sim_change_start" ]; then
+	echo 0 > /tmp/sim_change_start
+fi
+
+if [ ! -f "/tmp/sim_change_switch" ]; then
+	sim_switch off
+fi
+
+now=$(date +%s)
+sim_change_last=`cat /tmp/sim_change_start`
+sim_change_diff=$((now-sim_change_last))
+
+if [ "$sim_change_diff" -lt 60 ]; then
+	mcu_send_message "Please wait     >1min between   two SIM swaps.  ($sim_change_diff s)"
+	exit 1
+fi
+
+echo "$now" > /tmp/sim_change_start
+
+mcu_send_message "Starting SIM    swap."
+sleep 3
+
+
+## We're disabling this abort functionality for the moment because the switch keeps being blocked and we cannot notice the pulled switch. We could abort by default and require another toggle to continue.
+#i=5
+#until  [[ $i -lt 0 ]]
+#do
+#	mcu_send_message "Pull switch to  abort ($i).     "
+#	i=$((i-1))
+#	sleep 1
+#
+#	CHECK_ABORT
+#done
+#
+#mcu_send_message "Continuing ..."
+#sleep 1
+
+mcu_send_message "Disabling the ME from transmitting and receiving RF signals."
+sleep 3
+
+old_imei=$(READ_IMEI)
+old_imsi=$(READ_IMSI)
+
+# Persist the *real* original IMEI and IMSI to a tmpfs-backed file so that
+# stage2 (a separate process) can compare against the true pre-swap values.
+# Without this, stage2 reads what stage1 already randomized and its
+# "Old IMEI equals new IMEI" / "Did you swap the SIM?" warnings are useless.
+mkdir -p /tmp/blue-merle
+printf '%s' "$old_imei" > /tmp/blue-merle/original-imei
+printf '%s' "$old_imsi" > /tmp/blue-merle/original-imsi
+chmod 600 /tmp/blue-merle/original-imei /tmp/blue-merle/original-imsi
+
+#CHECK_ABORT
+
+answer=1
+cfun4_tries=0
+while [ "$answer" -eq 1 ]; do
+	if gl_modem AT AT+CFUN=4 | grep -q OK; then
+		answer=0
+		mcu_send_message "Disabled."
+		sleep 2
+	else
+		cfun4_tries=$((cfun4_tries+1))
+		if [ "$cfun4_tries" -ge 15 ]; then
+			mcu_send_message "Disabling failed after 15 tries. Aborting."
+			exit 1
+		fi
+		mcu_send_message "Disabling failed. Trying again."
+		# Only honour the abort switch after the toggle-driven "on" write
+		# happened; on manual invocation the switch is "off" and would
+		# abort on the very first retry.
+		if [ -f /tmp/blue-merle/toggle-driven ]; then
+			CHECK_ABORT
+		fi
+		sleep 1
+	fi
+done
+
+# CFUN=4 is asynchronous: the modem returns OK before radio is fully torn
+# down. Writing EGMR too early can either fail or (worse) land while the
+# modem is still transient. Give it a moment to settle.
+sleep 2
+
+## We generate a random IMEI to prevent a leak of the
+## new SIM's IMSI under the old IMEI in case the modem
+## still talks to the network
+if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r; then
+	mcu_send_message "WARNING:        interim IMEI set failed."
+	sleep 3
+fi
+
+
+# Adjust the prompt to match the actual state: if there was no SIM in the
+# first place, telling the user to "replace" one is confusing.
+if [ -z "$old_imsi" ]; then
+	mcu_send_message "No SIM detected. Insert one, then pull the switch."
+else
+	mcu_send_message "Replace the SIM card. Then pull the switch."
+fi
+
+echo done > /tmp/blue-merle-stage1
+logger -p notice -t blue-merle-toggle "Finished with Stage 1"
