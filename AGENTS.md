@@ -30,6 +30,29 @@ matching rewrite of every path in the tree.
   locally-administered (RFC 7844). Apple-OUI MACs are the exception,
   handled via `APPLE_MAC_GEN` only.
 
+## Quality standard (read this before every response)
+
+This project protects people in high-risk situations. Mistakes can have
+real-world consequences. Therefore:
+
+- **Self-verify every claim before stating it.** Read the actual code,
+  run the actual command, check the actual file — do not rely on memory
+  or assumptions. If you are not sure, say "I am not sure" and verify.
+- **Do not optimise for token efficiency or response speed.** Thoroughness
+  is more important than brevity. Take the extra turn to read a file,
+  run a test, or grep for a pattern before answering.
+- **When proposing a fix, walk through the code path mentally** — trace
+  every function call, every variable, every branch. Ask yourself:
+  "what happens if this variable is empty? what if the file is missing?
+  what if the modem is in CFUN=4?"
+- **When reviewing someone else's proposal, steelman it first.** Assume
+  they are right and find the strongest argument for their position.
+  Only then evaluate whether your counter-argument still holds. We have
+  already been wrong once by dismissing a reviewer's suggestion too
+  quickly (the TAC/Quectel discussion) — do not repeat that mistake.
+- **Admit errors explicitly.** If a previous answer was wrong, say "I was
+  wrong because X" and correct it. Do not quietly move on.
+
 ## Files that need caution
 
 | File | Why it's sensitive |

@@ -25,9 +25,12 @@ of that and adds:
   `Emma's iPhone` SSID), not a `GL-E750-<serial>`.
 - **44 unit tests** — upstream shipped none.
 
-**Target:** GL-E750 firmware `4.3.26` · MCU ≥ `1.0.7`
+**Target:** GL-E750 firmware `4.3.26` with MCU ≥ `1.0.7`
+
 **Package:** `blue-merle_3.0.5-local` (opkg name unchanged from upstream)
-**Usage:** [`USAGE.md`](./USAGE.md) (EN) · [`USAGE_RU.md`](./USAGE_RU.md) (RU)
+
+**Usage:** [`USAGE.md`](./USAGE.md) (EN) | [`USAGE_RU.md`](./USAGE_RU.md) (RU)
+
 **For AI agents:** [`AGENTS.md`](./AGENTS.md)
 **License:** BSD-3-Clause — see [`LICENSE.md`](./LICENSE.md)
 
