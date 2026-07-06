@@ -14,17 +14,21 @@ the upstream name **blue-merle**. Do NOT rename `PKG_NAME` in the
 Makefile without a full uninstall/reinstall on the target and a
 matching rewrite of every path in the tree.
 
+Key features added beyond upstream: Apple-device masquerade (OUI MACs
++ iPhone hostname + `<Name>'s iPhone` SSID), dual-mode TAC filter
+(module/phone IMEI TACs), `stable_identity` UCI option, per-uplink
+MAC rotation, tmpfs for `/root/esim` and `/etc/oui-tertf`.
+
 ## Ground rules
 
 - **Never push to `origin`** unless the user explicitly asks. All work
   lives on the `main` branch.
 - **Never commit, amend, push, or create PRs unless the user explicitly asks.**
   Show diffs, propose commit messages; wait for the user to say "commit".
-- **Never log or print full IMEI/IMSI values.** This is the tool's core
-  purpose (see `README.md § 1. Anti-anonymity leaks fixed`). Use masked
-  forms (`354567******1234`) for user-visible output.
-- **`shred` is banned on this codebase.** It is theatrical on NAND flash
-  (wear leveling) and pointless on tmpfs. Use `rm`, or better, mount tmpfs.
+- **Never log or print full IMEI/IMSI values.** Use masked forms
+  (`354567******1234`) for user-visible output.
+- **`shred` is banned.** It is theatrical on NAND flash (wear leveling)
+  and pointless on tmpfs. Use `rm`, or better, mount tmpfs.
 - **Do not add MAC generators without the U/L bit set unless the caller
   explicitly opts into an Apple OUI.** Free-form random MACs must be
   locally-administered (RFC 7844). Apple-OUI MACs are the exception,
@@ -57,20 +61,26 @@ real-world consequences. Therefore:
 
 | File | Why it's sensitive |
 |---|---|
-| `files/lib/blue-merle/functions.sh` | Central helpers — MAC/hostname/SSID randomizers, IMEI readers. Every function used by init, CLI and toggle. |
-| `files/usr/bin/blue-merle-switch-stage{1,2}` | Toggle-driven SIM swap. Runs without TTY. Split across two processes with tmpfs state. Timing-sensitive around `AT+CFUN=4` (asynchronous). |
-| `files/usr/bin/blue-merle` | Interactive CLI. `flock`-serialized. Must not deadlock; every `until` must be bounded. |
-| `files/lib/blue-merle/imei_generate.py` | Talks to modem over pyserial with `exclusive=True`. Careful with retry logic and validation regexes. |
-| `Makefile` | `preinst`/`postinst` run on the actual Mudi. Bugs here = broken install. |
+| `files/lib/blue-merle/functions.sh` | Central helpers — MAC/hostname/SSID randomizers, IMEI readers, `_rand16`, `_resolve_modem_tty`. Every function used by init, CLI and toggle. |
+| `files/usr/bin/blue-merle-switch-stage{1,2}` | Toggle-driven SIM swap. Runs without TTY. Split across two processes with tmpfs state. Timing-sensitive around `AT+CFUN=4` (asynchronous). Both now resolve TAC mode from UCI before calling Python. |
+| `files/usr/bin/blue-merle` | Interactive CLI. `flock`-serialized (`-E 99` for contention). Must not deadlock; every `until` must be bounded. Also resolves TAC mode from UCI. |
+| `files/lib/blue-merle/imei_generate.py` | Talks to modem over pyserial with `exclusive=True` + `fcntl.flock`. Loads TAC list from external file via `_load_tac_list()` with fallback. |
+| `files/lib/blue-merle/tac-list.txt` | Module TACs (86xxxxxx — Quectel, Sierra, Telit, u-blox). Default IMEI TAC pool. Editing wrong = broken IMEI generation or operator flags. |
+| `files/lib/blue-merle/tac-list-phone.txt` | Smartphone TACs (35xxxxxx + 86xxxxxx — Samsung, Apple, Xiaomi, etc.). Fallback pool for operators that block module TACs. |
+| `files/etc/config/blue-merle` | UCI config: `stable_identity` (freeze identity across reboots) and `tac_mode` (module/phone). Both control boot-time and rotation behaviour. |
+| `files/usr/libexec/blue-merle` | RPC entry point for LuCI. Enumerated subcommands only. Resolves TAC mode and modem TTY. `set-tac-mode` writes UCI. |
+| `Makefile` | `preinst`/`postinst` run on the actual Mudi. Bugs here = broken install. Also scrubs dead filenames and `__pycache__` from staged pkgdir. |
 | `files/usr/share/rpcd/acl.d/luci-app-blue-merle.json` | LuCI ACL. Do not add wildcards. Every subcommand enumerated explicitly. |
 
 ## Target platform
 
 - **Architecture:** `mips_24kc` (ath79/nand)
 - **OpenWrt:** 23.05, busybox ash (not bash). Avoid `[[ ]]`, `==`,
-  bash arrays. Test scripts with `sh -n`.
-- **Modem:** Quectel EP06-E/A, controlled via AT commands over `/dev/ttyUSB3`
-  (see `BLUE_MERLE_TTY` env override).
+  bash arrays, `${var:offset:length}`, `echo -n`/`echo -ne`. Test
+  scripts with `sh -n`.
+- **Modem:** Quectel EP06-E/A, controlled via AT commands. TTY is
+  discovered dynamically by `_resolve_modem_tty` (falls back through
+  `/dev/ttyUSB{3,2,1,0}`). Override via `BLUE_MERLE_TTY` env.
 - **MCU:** 16x2 char display accessed via `/dev/ttyS0` JSON protocol.
 - **Python:** 3.x from `python3-pyserial` package.
 
@@ -87,37 +97,45 @@ cp $SDK/bin/packages/mips_24kc/base/blue-merle_*.ipk ./dist/
 ## Test
 
 ```sh
-python3 tests/run_all.py   # 44 tests; must all pass
+python3 tests/run_all.py   # 60 tests; must all pass
 ```
 
 If pytest is not available, `run_all.py` is a lightweight replacement.
 
-## Common pitfalls
+## Common pitfalls (each one has bitten us — learn from our pain)
 
-- **`__pycache__` leaking into ipk:** local test runs create bytecode in
-  `files/lib/blue-merle/__pycache__/`. Makefile scrubs it at package time,
-  but also `rm -rf` before `git add` to avoid the noise.
-- **Modem TTY changes:** don't hardcode `/dev/ttyUSB3`. Discover dynamically.
-- **`uci commit` matters:** setting `glconfig.general.macclone_addr` requires
-  `uci commit glconfig`, not `uci commit network`.
-- **`5 GHz interface may be disabled`** in the user's config: always use
+- **`${var:offset:length}` is a bashism.** Busybox ash does not support
+  it. Use `printf '%s' "$var" | cut -c1-6` instead. `sh -n` will not
+  catch this — it fails at expansion time on the device.
+
+- **`echo -n` / `echo -ne` are non-portable.** Busybox echo behaviour
+  depends on `CONFIG_FEATURE_FANCY_ECHO`. Use `printf` consistently.
+
+- **`mountpoint` is not in busybox.** Use `grep -q " $dir " /proc/mounts`
+  instead. The `mountpoint -q` command silently failed and spammed the
+  boot log with "mountpoint: not found" on every reboot.
+
+- **`od` and `hexdump` are not in busybox on stock Mudi.** The old
+  `od -An -N2 -tu2 /dev/urandom | tr -d ' '` returned empty → every
+  `$(( "" % N + 1 ))` evaluated to 1 → rotation always picked the
+  first entry (`Aaron`, `iPhone-X`). Use `/proc/sys/kernel/random/uuid`
+  instead — kernel interface, no external tools. See `_rand16`.
+
+- **`uci commit` matters:** setting `glconfig.general.macclone_addr`
+  requires `uci commit glconfig`, not `uci commit network`.
+
+- **5 GHz interface may be disabled** in the user's config: always use
   `uci -q … 2>/dev/null || true` when touching `wireless.@wifi-iface[1]`.
+
 - **Interactive `read` in stage1/stage2:** these run without TTY. Never
   `read` there; use tmpfs state files instead.
-- **Busybox lacks `od` on stock Mudi firmware.** This bit us once already:
-  `od -An -N2 -tu2 /dev/urandom | tr -d ' '` returned empty, so every
-  `$(( "" % N + 1 ))` in `_pick_random_line` evaluated to 1 and rotation
-  always picked the first entry (`Aaron`, `iPhone-X`). Use
-  `/proc/sys/kernel/random/uuid` — it is a kernel interface, needs no
-  external tools, and yields a fresh 128-bit UUID per read. See
-  `_rand16` in `functions.sh`.
-- **`hexdump` is not always in busybox either.** Same principle as `od`:
-  prefer the kernel-provided interfaces or `printf '%x' "$n"`.
-- **Anything relying on `/dev/urandom` at boot on MIPS-without-hwrng:**
-  the pool may be under-seeded during `START=10` init. `entropy_avail`
-  can be as low as 128–256 in those seconds. `/proc/sys/kernel/random/uuid`
-  will still produce output but its quality may be low. Not a blocker
-  for privacy-related randomization, but a note for future audits.
+
+- **`__pycache__` leaking into ipk:** local test runs create bytecode.
+  Makefile scrubs it at package time, but also `rm -rf` before `git add`.
+
+- **Entropy at boot on MIPS-without-hwrng:** `entropy_avail` can be
+  128–256 during `START=10` init. `/proc/sys/kernel/random/uuid` still
+  works but quality may be low. Not a blocker for privacy randomization.
 
 ## When exploring / auditing
 

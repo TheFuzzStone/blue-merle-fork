@@ -53,7 +53,7 @@ case "$_tac_mode" in
     *)     export BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list.txt ;;
 esac
 
-echo -n "Swap SIM card and update IMEI? (Y/n): "
+printf 'Swap SIM card and update IMEI? (Y/n): '
 read -r answer
 case $answer in
 	n*|N*) answer=0;;
@@ -74,7 +74,7 @@ while [ "$answer" -eq 1 ]; do
 	if gl_modem AT AT+CFUN=4 | grep -q OK; then
 		answer=0
 	else
-		echo -n "...failed. Try again? (Y/n): "
+		printf '...failed. Try again? (Y/n): '
 		read -r reply
 		case $reply in
 			n*|N*) exit 1 ;;
@@ -97,7 +97,7 @@ if ! python3 /lib/blue-merle/imei_generate.py -r; then
 fi
 
 
-echo -n "Please now replace the SIM card and press any key to continue. "
+printf 'Please now replace the SIM card and press any key to continue. '
 read -r answer
 
 leak=0
@@ -148,7 +148,7 @@ elif [ "$old_imsi" = "$new_imsi" ]; then
 	echo
 fi
 
-echo -n "Would you like to set a random (r) or deterministic (d) IMEI? (R/d): "
+printf 'Would you like to set a random (r) or deterministic (d) IMEI? (R/d): '
 read -r answer
 case $answer in
 	d*|D*) answer=0;;
@@ -189,7 +189,7 @@ fi
 echo "You should now reset the modem or shutdown the device."
 echo "For extra privacy, you should shutdown the device and change your location."
 echo
-echo -n "Would you like to shutdown the device (s) or reset the modem (m)? (S/m): "
+printf 'Would you like to shutdown the device (s) or reset the modem (m)? (S/m): '
 read -r answer
 case $answer in
 	m*|M*) answer=0;;
@@ -234,7 +234,7 @@ else
 			echo "Modem did not come back within ${timeout_sec}s; aborting."
 			exit 1
 		fi
-		echo -ne "Waiting for reset to complete. (${elapsed}s/${timeout_sec}s)\r"
+		printf 'Waiting for reset to complete. (%ss/%ss)\r' "$elapsed" "$timeout_sec"
 		sleep 1
 	done
 	echo
