@@ -184,7 +184,8 @@ service blue-merle reload
 vi /lib/blue-merle/iphone-models.txt      # hostname (iPhone-15-Pro-Max, …)
 vi /lib/blue-merle/apple-oui.txt          # OUI-префиксы (3c:22:fb, …)
 vi /lib/blue-merle/us-first-names.txt     # имена для SSID (Emma, …)
-vi /lib/blue-merle/tac-list.txt           # TAC для IMEI (LTE-модули)
+vi /lib/blue-merle/tac-list.txt           # module TAC (86xxxxxx, по умолчанию)
+vi /lib/blue-merle/tac-list-phone.txt     # phone TAC (35xxxxxx, fallback)
 ```
 
 Правила: одна запись на строку, `#` — комментарий. **hostname** —
@@ -194,23 +195,30 @@ vi /lib/blue-merle/tac-list.txt           # TAC для IMEI (LTE-модули)
 **TAC** — ровно 8 десятичных цифр. Невалидные записи молча
 игнорируются. `service blue-merle reload` применяет без reboot.
 
-**TAC-список и двухслойная маскировка:**
+**TAC dual-mode и двухслойная маскировка:**
 
 Apple-маскировка (hostname + SSID + MAC) работает на **WiFi/Ethernet
 слое** — это видят соседние сканеры и upstream-сети. TAC-список
 работает на **сотовом слое** — это видит мобильный оператор при
 регистрации модема в сети.
 
-По умолчанию `tac-list.txt` содержит TAC от LTE-**модулей** (Quectel,
-Sierra, Telit, u-blox — диапазон `86xxxxxx`), а не от потребительских
-смартфонов (`35xxxxxx`). Это предотвращает самый очевидный флаг со
-стороны оператора: TAC говорит «Samsung Galaxy», а устройство ведёт
-себя как data-only LTE-модем с Linux-стеком.
+Два режима TAC, переключаемые через LuCI (Blue Merle → dropdown
+TAC mode) или UCI:
 
-Если ваша модель угроз предпочитает «слиться с миллионами телефонов»
-вместо «выглядеть как консистентный промышленный шлюз» — замените
-файл на смартфонные TAC, но учитывайте, что операторы с
-capability-checking зафиксируют несоответствие.
+| Режим | Файл | Диапазон | Когда использовать |
+|---|---|---|---|
+| **module** (по умолчанию) | `tac-list.txt` | 86xxxxxx | TAC от LTE-модулей Quectel/Sierra/Telit/u-blox. Соответствует реальному поведению устройства — нет флага capability-mismatch. Меньший anonymity set. |
+| **phone** (fallback) | `tac-list-phone.txt` | 35xxxxxx + 86xxxxxx | 78 смартфонных TAC (Samsung, Apple, Xiaomi, Huawei, Google, OnePlus). Больший anonymity set, но TAC говорит «телефон», а устройство ведёт себя как модем. Используйте если SIM не работает в module-режиме. |
+
+Переключение через UCI:
+```sh
+uci set blue-merle.main.tac_mode=phone     # или 'module'
+uci commit blue-merle
+```
+
+Или через LuCI: откройте страницу Blue Merle → dropdown TAC mode →
+выберите Phone → подтвердите. Изменение применяется при следующей
+смене IMEI.
 
 **Переменные окружения** (для скриптов / отладки):
 
@@ -402,7 +410,9 @@ service volatile-client-macs  {start,stop,enable,disable}
 
 # Конфиг
 uci set blue-merle.main.stable_identity=1 && uci commit blue-merle
+uci set blue-merle.main.tac_mode=phone && uci commit blue-merle    # или 'module'
 vi /lib/blue-merle/{iphone-models,apple-oui,us-first-names}.txt
+vi /lib/blue-merle/{tac-list,tac-list-phone}.txt
 
 # Диагностика
 sh /tmp/blue-merle-diag.sh                # пишет /tmp/blue-merle-diag.out
