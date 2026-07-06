@@ -122,6 +122,7 @@ alone. This fork rotates a coherent Apple identity end-to-end.
 | Apple OUI pool (`apple-oui.txt`, 30 real Apple prefixes) | Consistent story: MAC vendor lookup matches the iPhone hostname & SSID. |
 | iPhone hostname pool (`iphone-models.txt`, 25 models) | Replaces `Mudi-<serial>` — a stable per-device fingerprint that also identified the model. |
 | Personal-Hotspot SSID rotation (`<Name>'s iPhone`, 244 US names) | Replaces `GL-E750-<serial>` — WIGLE-indexable and model-identifying. |
+| TAC list curated to LTE-module range (`tac-list.txt`, 14 module TACs) | Upstream used smartphone TACs (`35xxxxxx`) which cause a capability-mismatch flag at the operator's TAC-lookup: "Samsung Galaxy" TAC on a data-only LTE modem with Linux DHCP. Module TACs (`86xxxxxx` — Quectel, Sierra, Telit, u-blox) match the device's actual behaviour. Editable file; users who prefer a larger anonymity set can swap in smartphone TACs. |
 | Ethernet MAC + hostname + per-uplink MAC rotation | Upstream only touched WiFi MACs at boot → Ethernet and hostname stayed as factory fingerprints between locations. |
 | `blue-merle-newmac`, `blue-merle-newssid` CLIs (`--uplink`, `--full`, `--dry-run`, `--pure-random`) | On-demand rotation without a reboot; different modes for different needs (repeater-switch, full identity change, RFC-7844 mode). |
 | Hotplug BSSID rewrite on WiFi `ifdown` (`30-blue-merle-bssid-on-ifdown`) | Every `wifi reload` now yields a fresh BSSID in the air on the very next ifup. |

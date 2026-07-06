@@ -183,14 +183,33 @@ service blue-merle reload
 vi /lib/blue-merle/iphone-models.txt      # hostnames (iPhone-15-Pro-Max, …)
 vi /lib/blue-merle/apple-oui.txt          # OUI prefixes (3c:22:fb, …)
 vi /lib/blue-merle/us-first-names.txt     # names for SSIDs (Emma, …)
+vi /lib/blue-merle/tac-list.txt           # IMEI TACs (LTE-module range)
 ```
 
 Rules: one entry per line, `#` = comment. **hostname** — only
 `[A-Za-z0-9-]`, up to 63 chars (RFC 952). **OUI** — lowercase
 `aa:bb:cc`. **Names** — ASCII letters only (the apostrophe in the
-`<Name>'s iPhone` SSID template is added automatically). Invalid
-entries are silently ignored. `service blue-merle reload` applies
-without a reboot.
+`<Name>'s iPhone` SSID template is added automatically). **TAC** —
+exactly 8 decimal digits. Invalid entries are silently ignored.
+`service blue-merle reload` applies without a reboot.
+
+**TAC list and the two-layer masquerade:**
+
+The Apple masquerade (hostname + SSID + MAC) operates on the
+**WiFi/Ethernet layer** — it's what nearby scanners and upstream
+networks see. The TAC list operates on the **cellular layer** —
+it's what the mobile operator sees when the modem registers.
+
+By default, `tac-list.txt` contains TACs from LTE **modules**
+(Quectel, Sierra, Telit, u-blox — all in the `86xxxxxx` range),
+not from consumer smartphones (`35xxxxxx`). This prevents the most
+obvious operator-side flag: a TAC that says "Samsung Galaxy" while
+the device behaves like a data-only LTE modem with a Linux stack.
+
+If your threat model prefers "blend in with millions of phones"
+over "look like a consistent industrial gateway", replace the file
+with smartphone TACs — but be aware that operators with
+capability-checking will flag the mismatch.
 
 **Environment overrides** (for scripts / debug):
 
@@ -202,6 +221,7 @@ without a reboot.
 | `BLUE_MERLE_APPLE_OUI` | Path to the Apple-OUI list (default `/lib/blue-merle/apple-oui.txt`) |
 | `BLUE_MERLE_IPHONE_MODELS` | Path to the iPhone-model list |
 | `BLUE_MERLE_US_NAMES` | Path to the US first-name list |
+| `BLUE_MERLE_TAC_LIST` | Path to the TAC list for IMEI generation (default `/lib/blue-merle/tac-list.txt`) |
 
 **Fall back to neutral (non-Apple) rotation:**
 

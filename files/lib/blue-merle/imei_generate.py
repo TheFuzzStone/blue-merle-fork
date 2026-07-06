@@ -36,6 +36,7 @@ import string
 import sys
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Iterable, Optional
 
 import serial
@@ -49,12 +50,52 @@ class Modes(Enum):
 
 # Example IMEI: 490154203237518
 IMEI_BODY_LENGTH = 14  # digits before the Luhn check digit
-IMEI_PREFIX = [
-    "35674108", "35290611", "35397710", "35323210", "35384110",
-    "35982748", "35672011", "35759049", "35266891", "35407115",
-    "35538025", "35480910", "35324590", "35901183", "35139729",
-    "35479164",
+
+# Fallback TAC list — used only if the external tac-list.txt file is
+# missing or unreadable. These are LTE-module TACs (86xxxxxx range)
+# that match the Quectel EP06's behaviour, not smartphone TACs.
+# The primary list lives in /lib/blue-merle/tac-list.txt and is
+# user-editable; see BLUE_MERLE_TAC_LIST env override below.
+_FALLBACK_TAC_LIST = [
+    "86818604", "86439104", "86596603", "86800604",
+    "86818603", "86818602", "86439103", "86439102",
+    "86249502", "86241503", "86249503",
+    "86128103", "86247002",
+    "86387302",
 ]
+
+
+def _load_tac_list() -> list[str]:
+    """Load the TAC list from the external file, falling back to the
+    hardcoded list if the file is missing, empty, or contains no valid
+    entries.
+
+    The file path can be overridden via the BLUE_MERLE_TAC_LIST
+    environment variable (used by tests and power users). The default
+    path is /lib/blue-merle/tac-list.txt on the device.
+
+    Only lines matching exactly 8 decimal digits are accepted; comments
+    (#) and blank lines are ignored. This mirrors the validation in
+    _pick_random_line in functions.sh.
+    """
+    path = Path(os.environ.get(
+        "BLUE_MERLE_TAC_LIST",
+        "/lib/blue-merle/tac-list.txt",
+    ))
+    tacs: list[str] = []
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if re.fullmatch(r"[0-9]{8}", line):
+                tacs.append(line)
+    except (OSError, UnicodeDecodeError):
+        log.debug("TAC list %s not readable, using fallback", path)
+    if tacs:
+        log.debug("Loaded %d TACs from %s", len(tacs), path)
+        return tacs
+    log.debug("TAC list %s empty or invalid, using fallback (%d entries)",
+              path, len(_FALLBACK_TAC_LIST))
+    return _FALLBACK_TAC_LIST
 
 # Serial defaults. The TTY can be overridden by the BLUE_MERLE_TTY env
 # variable so shell wrappers can point us at a different port when the
@@ -224,7 +265,7 @@ def _luhn_check_digit(body: str) -> int:
     return (10 - total % 10) % 10
 
 
-def generate_imei(imei_prefixes: Iterable[str], imsi_seed: Optional[bytes]) -> str:
+def generate_imei(tac_list: Iterable[str], imsi_seed: Optional[bytes]) -> str:
     """Generate an IMEI in either RANDOM or DETERMINISTIC mode.
 
     Reads the module-global `mode` (set by main() before entry). The
@@ -232,6 +273,10 @@ def generate_imei(imei_prefixes: Iterable[str], imsi_seed: Optional[bytes]) -> s
     needs `global` to *assign*, not to read, and this function only
     reads. Keeping it out avoids the false impression that
     generate_imei mutates the mode.
+
+    ``tac_list`` is an iterable of 8-digit TAC strings (Type Allocation
+    Codes). One is chosen at random; the remaining 6 body digits are
+    filled uniformly; a Luhn check digit is appended.
     """
     rng = random.Random()
 
@@ -245,16 +290,16 @@ def generate_imei(imei_prefixes: Iterable[str], imsi_seed: Optional[bytes]) -> s
         digest = hashlib.sha256(imsi_seed).digest()
         rng.seed(int.from_bytes(digest, "big"))
 
-    prefix = rng.choice(list(imei_prefixes))
-    log.debug("IMEI prefix: %s", prefix)
+    tac = rng.choice(list(tac_list))
+    log.debug("TAC (first 8 digits): %s", tac)
 
-    tail_length = IMEI_BODY_LENGTH - len(prefix)
+    tail_length = IMEI_BODY_LENGTH - len(tac)
     # random.choices samples *with* replacement so each digit is uniform
     # and independent. The previous random.sample lost ~2.7 bits of entropy
     # per IMEI and, worse, produced tails that never contained repeated
     # digits — a statistical fingerprint of the tool itself.
     tail = "".join(rng.choices(string.digits, k=tail_length))
-    body = prefix + tail
+    body = tac + tail
     log.debug("IMEI without check digit: %s", body)
 
     imei = body + str(_luhn_check_digit(body))
@@ -339,7 +384,8 @@ def main() -> int:
         print(args.static)
         return 0
 
-    imei = generate_imei(IMEI_PREFIX, imsi_seed)
+    tac_list = _load_tac_list()
+    imei = generate_imei(tac_list, imsi_seed)
     log.info("Generated new IMEI: %s", imei)
     if not args.generate_only and not set_imei(imei):
         return 1

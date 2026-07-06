@@ -184,14 +184,33 @@ service blue-merle reload
 vi /lib/blue-merle/iphone-models.txt      # hostname (iPhone-15-Pro-Max, …)
 vi /lib/blue-merle/apple-oui.txt          # OUI-префиксы (3c:22:fb, …)
 vi /lib/blue-merle/us-first-names.txt     # имена для SSID (Emma, …)
+vi /lib/blue-merle/tac-list.txt           # TAC для IMEI (LTE-модули)
 ```
 
 Правила: одна запись на строку, `#` — комментарий. **hostname** —
 только `[A-Za-z0-9-]`, до 63 символов (RFC 952). **OUI** — формат
 `aa:bb:cc` в нижнем регистре. **Имена** — только ASCII-буквы
 (апостроф в SSID `<Name>'s iPhone` добавляется автоматически).
-Невалидные записи молча игнорируются. `service blue-merle reload`
-применяет без reboot.
+**TAC** — ровно 8 десятичных цифр. Невалидные записи молча
+игнорируются. `service blue-merle reload` применяет без reboot.
+
+**TAC-список и двухслойная маскировка:**
+
+Apple-маскировка (hostname + SSID + MAC) работает на **WiFi/Ethernet
+слое** — это видят соседние сканеры и upstream-сети. TAC-список
+работает на **сотовом слое** — это видит мобильный оператор при
+регистрации модема в сети.
+
+По умолчанию `tac-list.txt` содержит TAC от LTE-**модулей** (Quectel,
+Sierra, Telit, u-blox — диапазон `86xxxxxx`), а не от потребительских
+смартфонов (`35xxxxxx`). Это предотвращает самый очевидный флаг со
+стороны оператора: TAC говорит «Samsung Galaxy», а устройство ведёт
+себя как data-only LTE-модем с Linux-стеком.
+
+Если ваша модель угроз предпочитает «слиться с миллионами телефонов»
+вместо «выглядеть как консистентный промышленный шлюз» — замените
+файл на смартфонные TAC, но учитывайте, что операторы с
+capability-checking зафиксируют несоответствие.
 
 **Переменные окружения** (для скриптов / отладки):
 
@@ -203,6 +222,7 @@ vi /lib/blue-merle/us-first-names.txt     # имена для SSID (Emma, …)
 | `BLUE_MERLE_APPLE_OUI` | Путь к списку Apple-OUI (default: `/lib/blue-merle/apple-oui.txt`) |
 | `BLUE_MERLE_IPHONE_MODELS` | Путь к списку моделей iPhone |
 | `BLUE_MERLE_US_NAMES` | Путь к списку US-имён |
+| `BLUE_MERLE_TAC_LIST` | Путь к списку TAC для генерации IMEI (default `/lib/blue-merle/tac-list.txt`) |
 
 **Откат к нейтральной (не-Apple) ротации:**
 
