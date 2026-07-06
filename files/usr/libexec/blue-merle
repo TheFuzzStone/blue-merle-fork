@@ -53,14 +53,17 @@ case "$1" in
         # Mask the middle of the IMEI on the MCU screen so a shoulder-
         # surfer / photograph does not immediately capture the full
         # identifier. The full value is still returned on stdout to LuCI.
-        masked="${imei:0:6}******${imei:12}"
+        #
+        # NOTE: ${var:offset:length} is a bashism — busybox ash does not
+        # support it. Use cut(1) instead, which is available in busybox.
+        masked="$(printf '%s' "$imei" | cut -c1-6)******$(printf '%s' "$imei" | cut -c13-)"
         show_message "IMEI: $masked"
         printf '%s' "$imei"
         ;;
 
     read-imsi)
         imsi=$(READ_IMSI) || { echo "No IMSI found" >&2; exit 1; }
-        masked="${imsi:0:5}******${imsi:11}"
+        masked="$(printf '%s' "$imsi" | cut -c1-5)******$(printf '%s' "$imsi" | cut -c12-)"
         show_message "IMSI: $masked"
         printf '%s' "$imsi"
         ;;

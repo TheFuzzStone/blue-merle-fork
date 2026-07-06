@@ -166,6 +166,12 @@ function handleTacModeChange(newMode, selectEl) {
 		  + '<br><br>'
 		  + '<b>This is the recommended default.</b>');
 
+	/* Save the previous value so we can revert the dropdown if the
+	 * UCI write fails. This is safer than assuming the opposite of
+	 * newMode was the previous value — it explicitly captures the
+	 * state before the change. */
+	var prevMode = selectEl ? selectEl.getAttribute('data-prev-mode') || 'module' : 'module';
+
 	confirmModal(
 		_('Switch TAC mode to: ') + modeLabel + '?',
 		[
@@ -177,6 +183,7 @@ function handleTacModeChange(newMode, selectEl) {
 		_('Switch mode'),
 		function() {
 			callBlueMerle('set-tac-mode', [newMode]).then(function() {
+				if (selectEl) selectEl.setAttribute('data-prev-mode', newMode);
 				ui.addNotification(null,
 					E('p', {}, _('TAC mode switched to ') + modeLabel));
 			}).catch(function(err) {
@@ -184,7 +191,7 @@ function handleTacModeChange(newMode, selectEl) {
 					E('p', { 'class': 'bm-warn' },
 						_('Failed to switch TAC mode: ') + err));
 				/* Revert the dropdown to the previous value */
-				if (selectEl) selectEl.value = newMode === 'phone' ? 'module' : 'phone';
+				if (selectEl) selectEl.value = prevMode;
 			});
 		}
 	);
@@ -238,7 +245,9 @@ return view.extend({
 				])
 			]),
 
-			/* TAC mode dropdown */
+			/* TAC mode dropdown. The initial value is NOT hardcoded —
+			 * readTacMode() sets it after page render so the dropdown
+			 * always reflects the actual UCI state. */
 			E('div', { 'class': 'bm-tac-row' }, [
 				E('label', {}, _('TAC mode:')),
 				E('select', {
@@ -251,7 +260,7 @@ return view.extend({
 						}
 					}
 				}, [
-					E('option', { 'value': 'module', 'selected': true }, [ _('Module (86xx — recommended)') ]),
+					E('option', { 'value': 'module' }, [ _('Module (86xx — recommended)') ]),
 					E('option', { 'value': 'phone' }, [ _('Phone (35xx — fallback)') ])
 				]),
 				E('span', {}, [
@@ -299,12 +308,23 @@ return view.extend({
 			if (el) el.value = _('no IMSI (SIM missing?)');
 		});
 
-		/* Load current TAC mode and set the dropdown */
+		/* Load current TAC mode and set the dropdown. The initial
+		 * HTML has no 'selected' attribute — we set it here after
+		 * the async read resolves, so the dropdown always reflects
+		 * the actual UCI state rather than a hardcoded default. */
 		readTacMode().then(function(mode) {
 			var el = document.getElementById(tacSelectID);
-			if (el) el.value = mode;
+			if (el) {
+				el.value = mode;
+				el.setAttribute('data-prev-mode', mode);
+			}
 		}).catch(function() {
 			/* Default to 'module' if read fails */
+			var el = document.getElementById(tacSelectID);
+			if (el) {
+				el.value = 'module';
+				el.setAttribute('data-prev-mode', 'module');
+			}
 		});
 
 		return view;
