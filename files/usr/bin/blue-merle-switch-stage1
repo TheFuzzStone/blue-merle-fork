@@ -9,6 +9,14 @@
 BLUE_MERLE_TTY=$(_resolve_modem_tty)
 export BLUE_MERLE_TTY
 
+# Resolve TAC mode from UCI so imei_generate.py uses the correct TAC
+# pool (module 86xx or phone 35xx). Default is 'module'.
+_tac_mode=$(uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module)
+case "$_tac_mode" in
+    phone) export BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list-phone.txt ;;
+    *)     export BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list.txt ;;
+esac
+
 if [ ! -f "/tmp/sim_change_start" ]; then
 	echo 0 > /tmp/sim_change_start
 fi

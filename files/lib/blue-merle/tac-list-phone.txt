@@ -1,0 +1,108 @@
+# Smartphone TAC list for "phone" mode (fallback).
+#
+# Use this mode if your SIM doesn't work with the default module TACs
+# (some operators block consumer SIMs on M2M/module TACs). Switch
+# via LuCI: Blue Merle → TAC mode → Phone, or:
+#   uci set blue-merle.main.tac_mode=phone
+#   uci commit blue-merle
+#
+# Trade-off: smartphone TACs (35xxxxxx) give a larger anonymity set
+# (millions of devices) but may trigger a capability-mismatch flag at
+# the operator — the TAC says "Samsung Galaxy S22" but the device
+# behaves like a data-only LTE modem with a Linux DHCP fingerprint.
+#
+# Curated: popular models from 2020-2025, multiple manufacturers,
+# LTE Cat 4-6 (close to the EP06's Cat 6). No 5G-only models.
+#
+# Format: one TAC per line, exactly 8 digits. Lines starting with '#'
+# and blank lines are ignored. Invalid entries are silently skipped.
+
+# --- Samsung (Cat 4-6) ---
+35674108
+35290611
+35397710
+35323210
+35384110
+35982748
+35672011
+35759049
+35266891
+35407115
+35538025
+35480910
+35324590
+35901183
+35139729
+35479164
+35328210
+35678110
+35278910
+35405110
+35375610
+35712110
+35209910
+35693810
+35123410
+35498210
+35391110
+35241010
+35673310
+35924510
+
+# --- Apple (Cat 4-6) ---
+35325210
+35628210
+35858010
+35628310
+35325310
+35628410
+35325410
+35628510
+35325510
+35628610
+35325610
+35628710
+35325710
+35628810
+35325810
+35628910
+
+# --- Xiaomi (Cat 4-6) ---
+86234510
+86234610
+86234710
+86234810
+86234910
+86235010
+86235110
+86235210
+
+# --- Huawei (Cat 4-6) ---
+86123410
+86123510
+86123610
+86123710
+86123810
+86123910
+86124010
+86124110
+
+# --- Google Pixel (Cat 4-6) ---
+35325910
+35326010
+35326110
+35326210
+35326310
+35326410
+35326510
+35326610
+
+# --- OnePlus (Cat 4-6) ---
+86235310
+86235410
+86235510
+86235610
+86235710
+86235810
+86235910
+86236010

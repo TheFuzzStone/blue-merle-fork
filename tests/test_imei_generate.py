@@ -37,14 +37,25 @@ sys.path.insert(0, str(_MODULE_DIR))
 
 import imei_generate as m  # noqa: E402
 
-# Path to the TAC list file in the repo.
-_TAC_FILE = _MODULE_DIR / "tac-list.txt"
+# Paths to both TAC list files.
+_TAC_FILE_MODULE = _MODULE_DIR / "tac-list.txt"
+_TAC_FILE_PHONE = _MODULE_DIR / "tac-list-phone.txt"
 
 
 def _load_tac_list_from_file() -> list[str]:
     """Load TACs from the repo's tac-list.txt, matching the production code."""
     tacs = []
-    for raw in _TAC_FILE.read_text(encoding="utf-8").splitlines():
+    for raw in _TAC_FILE_MODULE.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if re.fullmatch(r"[0-9]{8}", line):
+            tacs.append(line)
+    return tacs
+
+
+def _load_phone_tac_list_from_file() -> list[str]:
+    """Load TACs from the repo's tac-list-phone.txt."""
+    tacs = []
+    for raw in _TAC_FILE_PHONE.read_text(encoding="utf-8").splitlines():
         line = raw.split("#", 1)[0].strip()
         if re.fullmatch(r"[0-9]{8}", line):
             tacs.append(line)
@@ -97,7 +108,7 @@ def test_validate_rejects_non_digit():
 
 def test_tac_list_file_exists():
     """The tac-list.txt file must exist in the repo."""
-    assert _TAC_FILE.exists(), f"tac-list.txt not found at {_TAC_FILE}"
+    assert _TAC_FILE_MODULE.exists(), f"tac-list.txt not found at {_TAC_FILE_MODULE}"
 
 
 def test_tac_list_non_empty():
@@ -248,3 +259,63 @@ def test_deterministic_uses_module_range():
     imei = m.generate_imei(tacs, b"310150123456789")
     assert imei.startswith("86"), \
         f"deterministic IMEI {imei} not in module range"
+
+
+# ---- Phone-mode TAC list (fallback) ----
+
+def test_phone_tac_list_file_exists():
+    assert _TAC_FILE_PHONE.exists(), f"tac-list-phone.txt not found at {_TAC_FILE_PHONE}"
+
+
+def test_phone_tac_list_non_empty():
+    tacs = _load_phone_tac_list_from_file()
+    assert len(tacs) >= 20, f"tac-list-phone.txt has only {len(tacs)} entries"
+
+
+def test_phone_tac_list_all_8_digits():
+    tacs = _load_phone_tac_list_from_file()
+    for tac in tacs:
+        assert re.fullmatch(r"[0-9]{8}", tac), f"invalid phone TAC: {tac!r}"
+
+
+def test_phone_tac_list_no_duplicates():
+    tacs = _load_phone_tac_list_from_file()
+    assert len(tacs) == len(set(tacs)), f"duplicate phone TACs"
+
+
+def test_phone_tac_list_has_multiple_manufacturers():
+    """The phone TAC list should span multiple manufacturers (Samsung,
+    Apple, Xiaomi, Huawei, Google, OnePlus) — not just one brand.
+    We check that both 35xxxxxx and 86xxxxxx prefixes are present
+    (Samsung/Apple use 35, Xiaomi/Huawei use 86).
+    """
+    tacs = _load_phone_tac_list_from_file()
+    prefixes_35 = [t for t in tacs if t.startswith("35")]
+    prefixes_86 = [t for t in tacs if t.startswith("86")]
+    assert len(prefixes_35) > 0, "no 35xx TACs in phone list"
+    assert len(prefixes_86) > 0, "no 86xx TACs in phone list"
+
+
+def test_phone_mode_generates_luhn_valid_imeis():
+    """When using the phone TAC list, all generated IMEIs must still
+    be Luhn-valid and their TAC must come from the phone list.
+    """
+    m.mode = m.Modes.RANDOM
+    phone_tacs = _load_phone_tac_list_from_file()
+    for _ in range(100):
+        imei = m.generate_imei(phone_tacs, None)
+        assert len(imei) == 15
+        assert imei.isdigit()
+        assert m.validate_imei(imei), f"generated invalid IMEI: {imei}"
+        assert imei[:8] in phone_tacs, \
+            f"TAC {imei[:8]} not in phone tac-list"
+
+
+def test_module_and_phone_lists_do_not_overlap():
+    """The module and phone TAC lists must not share any TAC — they
+    represent different device classes and must be disjoint.
+    """
+    module_tacs = set(_load_tac_list_from_file())
+    phone_tacs = set(_load_phone_tac_list_from_file())
+    overlap = module_tacs & phone_tacs
+    assert not overlap, f"module and phone TAC lists overlap: {overlap}"

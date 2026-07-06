@@ -1,18 +1,20 @@
 {
 	"luci-app-blue-merle": {
-		"description": "Grant access to blue-merle (IMEI/IMSI reading and SIM-swap workflow)",
+		"description": "Grant access to blue-merle (IMEI/IMSI reading, SIM-swap workflow, TAC mode)",
 		"read": {
 			"cgi-io": [ "exec" ],
 			"file": {
 				"/usr/libexec/blue-merle read-imei": [ "exec" ],
-				"/usr/libexec/blue-merle read-imsi": [ "exec" ]
+				"/usr/libexec/blue-merle read-imsi": [ "exec" ],
+				"/usr/libexec/blue-merle read-tac-mode": [ "exec" ]
 			}
 		},
 		"write": {
 			"file": {
 				"/usr/libexec/blue-merle random-imei": [ "exec" ],
 				"/usr/libexec/blue-merle shutdown-modem": [ "exec" ],
-				"/usr/libexec/blue-merle shutdown": [ "exec" ]
+				"/usr/libexec/blue-merle shutdown": [ "exec" ],
+				"/usr/libexec/blue-merle set-tac-mode": [ "exec" ]
 			}
 		}
 	}

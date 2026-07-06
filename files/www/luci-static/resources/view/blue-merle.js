@@ -6,20 +6,10 @@
 /*
  * blue-merle LuCI view.
  *
- * Trimmed down from the historical version, which carried a large chunk
- * of unused boilerplate copied from the opkg management view (dead
- * handlers, a broken handleConfig with undefined resolveFn/rejectFn, an
- * unreachable Set-Random button, etc.). All that is removed.
- *
- * Design decisions:
- *
- * - IMEI/IMSI are considered sensitive. We display them masked in the
- *   UI so a screenshot / shoulder-surf does not immediately capture the
- *   full identifier. A small "Reveal" button expands the field on
- *   demand.
- *
- * - The SIM swap and shutdown actions are destructive and irreversible
- *   in a single click; both are guarded by a confirmation modal.
+ * Features:
+ * - IMEI/IMSI displayed masked (click to reveal).
+ * - TAC mode dropdown (Module / Phone) with confirmation modal.
+ * - SIM swap and Shutdown guarded by confirmation modals.
  */
 
 var isReadonlyView = !L.hasViewPermission() || null;
@@ -30,10 +20,15 @@ var css = ''
 	+ '.controls label { min-width: 80px; font-weight: bold; }'
 	+ '.controls input[type=text] { flex: 1; }'
 	+ '.bm-warn { color: #c44; font-weight: bold; }'
-	+ '.bm-danger { background: #c44; color: #fff; }';
+	+ '.bm-danger { background: #c44; color: #fff; }'
+	+ '.bm-tac-row { margin: .5em 0; display: flex; align-items: center; gap: .5em; }'
+	+ '.bm-tac-row label { font-weight: bold; min-width: 80px; }'
+	+ '.bm-tac-row select { min-width: 180px; }';
 
-function callBlueMerle(arg) {
-	return fs.exec('/usr/libexec/blue-merle', [arg]).then(function(res) {
+function callBlueMerle(arg, extraArgs) {
+	var args = [arg];
+	if (extraArgs) args = args.concat(extraArgs);
+	return fs.exec('/usr/libexec/blue-merle', args).then(function(res) {
 		if (res.code !== 0)
 			throw new Error('blue-merle ' + arg + ' exited with code ' + res.code + (res.stderr ? ': ' + res.stderr : ''));
 		return (res.stdout || '').trim();
@@ -48,6 +43,7 @@ function maskId(id) {
 
 function readIMEI() { return callBlueMerle('read-imei'); }
 function readIMSI() { return callBlueMerle('read-imsi'); }
+function readTacMode() { return callBlueMerle('read-tac-mode'); }
 
 function confirmModal(title, body, confirmLabel, onConfirm) {
 	var dlg = ui.showModal(title, [
@@ -155,6 +151,45 @@ function handleSimSwap() {
 	);
 }
 
+function handleTacModeChange(newMode, selectEl) {
+	var modeLabel = newMode === 'phone' ? _('Phone (smartphone TACs)') : _('Module (LTE-module TACs)');
+	var description = newMode === 'phone' ?
+		_('<b>Phone mode</b> uses smartphone TACs (35xxxxxx). This gives a larger anonymity set '
+		  + '(millions of devices) but may trigger a capability-mismatch flag at the operator: '
+		  + 'the TAC says "Samsung Galaxy" but the device behaves like a data-only LTE modem. '
+		  + '<br><br>'
+		  + '<b>Use this if your SIM does not work in Module mode</b> — some operators block '
+		  + 'consumer SIMs on M2M/module TACs.') :
+		_('<b>Module mode</b> uses LTE-module TACs (86xxxxxx — Quectel, Sierra, Telit, u-blox). '
+		  + 'This matches the device\'s actual behaviour and avoids the operator\'s capability-'
+		  + 'mismatch flag. The anonymity set is smaller (industrial gateways) but consistent. '
+		  + '<br><br>'
+		  + '<b>This is the recommended default.</b>');
+
+	confirmModal(
+		_('Switch TAC mode to: ') + modeLabel + '?',
+		[
+			E('p', {}, description),
+			E('p', { 'class': 'bm-warn' },
+				_('The change takes effect at the next IMEI rotation (SIM swap, toggle, or '
+				  + 'blue-merle-newmac --full). The current IMEI is not affected.'))
+		],
+		_('Switch mode'),
+		function() {
+			callBlueMerle('set-tac-mode', [newMode]).then(function() {
+				ui.addNotification(null,
+					E('p', {}, _('TAC mode switched to ') + modeLabel));
+			}).catch(function(err) {
+				ui.addNotification(null,
+					E('p', { 'class': 'bm-warn' },
+						_('Failed to switch TAC mode: ') + err));
+				/* Revert the dropdown to the previous value */
+				if (selectEl) selectEl.value = newMode === 'phone' ? 'module' : 'phone';
+			});
+		}
+	);
+}
+
 function attachRevealHandler(inputEl, fullValueGetter) {
 	var revealed = false;
 	inputEl.addEventListener('click', function() {
@@ -171,6 +206,7 @@ return view.extend({
 	render: function() {
 		var imeiInputID = 'bm-imei-input';
 		var imsiInputID = 'bm-imsi-input';
+		var tacSelectID = 'bm-tac-select';
 		var imeiCache = '';
 		var imsiCache = '';
 
@@ -199,6 +235,27 @@ return view.extend({
 						'value': '',
 						'readonly': true
 					})
+				])
+			]),
+
+			/* TAC mode dropdown */
+			E('div', { 'class': 'bm-tac-row' }, [
+				E('label', {}, _('TAC mode:')),
+				E('select', {
+					'id': tacSelectID,
+					'disabled': isReadonlyView,
+					'change': function(ev) {
+						var newMode = ev.target.value;
+						if (newMode === 'module' || newMode === 'phone') {
+							handleTacModeChange(newMode, ev.target);
+						}
+					}
+				}, [
+					E('option', { 'value': 'module', 'selected': true }, [ _('Module (86xx — recommended)') ]),
+					E('option', { 'value': 'phone' }, [ _('Phone (35xx — fallback)') ])
+				]),
+				E('span', {}, [
+					_('  Switch to Phone if your SIM does not work in Module mode.')
 				])
 			]),
 
@@ -240,6 +297,14 @@ return view.extend({
 		}).catch(function() {
 			var el = document.getElementById(imsiInputID);
 			if (el) el.value = _('no IMSI (SIM missing?)');
+		});
+
+		/* Load current TAC mode and set the dropdown */
+		readTacMode().then(function(mode) {
+			var el = document.getElementById(tacSelectID);
+			if (el) el.value = mode;
+		}).catch(function() {
+			/* Default to 'module' if read fails */
 		});
 
 		return view;

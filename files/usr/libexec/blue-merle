@@ -15,6 +15,25 @@
 BLUE_MERLE_TTY=$(_resolve_modem_tty)
 export BLUE_MERLE_TTY
 
+# Resolve TAC mode from UCI and export the right TAC list path so
+# imei_generate.py picks up the correct pool (module vs phone TACs).
+# Default is 'module' (86xxxxxx — Quectel/Sierra/Telit/u-blox). Users
+# switch to 'phone' (35xxxxxx — smartphone TACs) via LuCI or uci if
+# their operator blocks consumer SIMs on module TACs.
+_resolve_tac_list() {
+    local tac_mode
+    tac_mode=$(uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module)
+    case "$tac_mode" in
+        phone)
+            BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list-phone.txt
+            ;;
+        *)
+            BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list.txt
+            ;;
+    esac
+    export BLUE_MERLE_TAC_LIST
+}
+
 show_message() {
     # There is mcu_send_message() in /lib/functions/gl_util.sh but we
     # don't want to load the whole file (it is heavy and pulls in a
@@ -46,7 +65,29 @@ case "$1" in
         printf '%s' "$imsi"
         ;;
 
+    read-tac-mode)
+        # Return the current TAC mode for the LuCI dropdown.
+        uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module
+        ;;
+
+    set-tac-mode)
+        mode_val="${2:-module}"
+        case "$mode_val" in
+            module|phone)
+                uci set blue-merle.main.tac_mode="$mode_val"
+                uci commit blue-merle
+                logger -p notice -t blue-merle-libexec "TAC mode set to $mode_val"
+                echo "TAC mode: $mode_val"
+                ;;
+            *)
+                echo "invalid tac_mode: $mode_val (expected: module|phone)" >&2
+                exit 2
+                ;;
+        esac
+        ;;
+
     random-imei)
+        _resolve_tac_list
         flock -n /tmp/blue-merle-imei-generate.lock \
             timeout 15 python3 /lib/blue-merle/imei_generate.py --random \
             || { echo "IMEI change failed" >&2; exit 1; }
