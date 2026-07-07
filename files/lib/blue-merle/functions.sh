@@ -110,7 +110,7 @@ PY
 # Randomize both AP BSSIDs (2.4 GHz + 5 GHz) using Apple OUIs.
 RESET_BSSIDS () {
     uci set wireless.@wifi-iface[0].macaddr="$(APPLE_MAC_GEN)"
-    uci set wireless.@wifi-iface[1].macaddr="$(APPLE_MAC_GEN)"
+    uci -q set wireless.@wifi-iface[1].macaddr="$(APPLE_MAC_GEN)" 2>/dev/null || true
     uci commit wireless
     # you need to reset wifi for changes to apply, i.e. executing "wifi"
 }

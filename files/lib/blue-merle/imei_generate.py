@@ -6,7 +6,7 @@ The script exposes three modes:
 
 * --random         Generate a fresh random IMEI.
 * --deterministic  Derive an IMEI reproducibly from the current SIM's IMSI.
-* --static IMEI    Set a user-provided IMEI (14 digits without check).
+* --static IMEI    Set a user-provided IMEI (15 digits, Luhn-valid).
 
 Design notes / non-obvious fixes vs. the historical version:
 
