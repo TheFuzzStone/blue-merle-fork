@@ -22,6 +22,10 @@ export BLUE_MERLE_TTY
 # their operator blocks consumer SIMs on module TACs.
 _resolve_tac_list() { _resolve_tac_selection; }
 
+_tac_file_has_valid_entry() {
+    grep -Eq '^[[:space:]]*[0-9]{8}([[:space:]]*(#.*)?)?$' "$1" 2>/dev/null
+}
+
 show_message() {
     # There is mcu_send_message() in /lib/functions/gl_util.sh but we
     # don't want to load the whole file (it is heavy and pulls in a
@@ -63,20 +67,16 @@ case "$1" in
         uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module
         ;;
 
-    set-tac-mode)
-        mode_val="${2:-module}"
-        case "$mode_val" in
-            module|phone)
-                uci set blue-merle.main.tac_mode="$mode_val"
-                uci commit blue-merle
-                logger -p notice -t blue-merle-libexec "TAC mode set to $mode_val"
-                echo "TAC mode: $mode_val"
-                ;;
-            *)
-                echo "invalid tac_mode: $mode_val (expected: module|phone)" >&2
-                exit 2
-                ;;
-        esac
+    set-tac-mode-module|set-tac-mode-phone)
+        mode_val=${1##set-tac-mode-}
+        if [ "$mode_val" = "phone" ] && ! _tac_file_has_valid_entry /lib/blue-merle/tac-list-phone.txt; then
+            echo "phone TAC mode requires at least one verified 8-digit TAC in tac-list-phone.txt" >&2
+            exit 1
+        fi
+        uci set blue-merle.main.tac_mode="$mode_val" || exit 1
+        uci commit blue-merle || exit 1
+        logger -p notice -t blue-merle-libexec "TAC mode set to $mode_val"
+        echo "TAC mode: $mode_val"
         ;;
 
     prepare-sim-swap)

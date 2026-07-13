@@ -52,6 +52,23 @@ def test_luci_rpc_returns_masked_identifiers():
     assert "random-imei)" not in src
 
 
+def test_luci_tac_acl_uses_exact_subcommands_without_arguments():
+    acl = _read("files/usr/share/rpcd/acl.d/luci-app-blue-merle.json")
+    libexec = _read("files/usr/libexec/blue-merle")
+    assert "set-tac-mode-module" in acl
+    assert "set-tac-mode-phone" in acl
+    assert 'set-tac-mode)' not in libexec
+
+
+def test_network_tools_check_failures_before_reporting_success():
+    newssid = _read("files/usr/bin/blue-merle-newssid")
+    newmac = _read("files/usr/bin/blue-merle-newmac")
+    assert 'RANDOMIZE_SSID ||' in newssid
+    assert 'wifi reload ||' in newssid
+    assert 'ifdown "$_iface"' in newmac and 'ifdown $_iface failed' in newmac
+    assert 'ifup "$_iface"' in newmac and 'ifup $_iface failed' in newmac
+
+
 def test_build_does_not_mutate_source_tree():
     src = _read("Makefile")
     install = src.split("define Package/blue-merle/install", 1)[1].split("endef", 1)[0]

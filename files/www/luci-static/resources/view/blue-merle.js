@@ -144,15 +144,14 @@ function handleSimSwap() {
 function handleTacModeChange(newMode, selectEl) {
 	var modeLabel = newMode === 'phone' ? _('Phone (smartphone TACs)') : _('Module (LTE-module TACs)');
 	var description = newMode === 'phone' ?
-		_('<b>Phone mode</b> uses smartphone TACs (35xxxxxx). This gives a larger anonymity set '
-		  + '(millions of devices) but may trigger a capability-mismatch flag at the operator: '
-		  + 'the TAC says "Samsung Galaxy" but the device behaves like a data-only LTE modem. '
+		_('<b>Phone mode</b> uses TACs explicitly supplied by the user in tac-list-phone.txt. '
+		  + 'The project does not ship guessed TAC allocations. The mode cannot be enabled until '
+		  + 'the file contains at least one verified 8-digit TAC with authoritative provenance. '
 		  + '<br><br>'
-		  + '<b>Use this if your SIM does not work in Module mode</b> — some operators block '
-		  + 'consumer SIMs on M2M/module TACs.') :
-		_('<b>Module mode</b> uses LTE-module TACs (86xxxxxx — Quectel, Sierra, Telit, u-blox). '
-		  + 'This matches the device\'s actual behaviour and avoids the operator\'s capability-'
-		  + 'mismatch flag. The anonymity set is smaller (industrial gateways) but consistent. '
+		  + '<b>Only enable this after adding TACs from a licensed/authoritative GSMA source.</b>') :
+		_('<b>Module mode</b> preserves the TAC currently reported by the physical modem. '
+		  + 'No manufacturer or device-class inference is made from TAC prefixes, and no '
+		  + 'external TAC database is required. '
 		  + '<br><br>'
 		  + '<b>This is the recommended default.</b>');
 
@@ -172,7 +171,7 @@ function handleTacModeChange(newMode, selectEl) {
 		],
 		_('Switch mode'),
 		function() {
-			callBlueMerle('set-tac-mode', [newMode]).then(function() {
+			callBlueMerle('set-tac-mode-' + newMode).then(function() {
 				if (selectEl) selectEl.setAttribute('data-prev-mode', newMode);
 				ui.addNotification(null,
 					E('p', {}, _('TAC mode switched to ') + modeLabel));

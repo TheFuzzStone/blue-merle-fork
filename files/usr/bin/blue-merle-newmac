@@ -85,8 +85,8 @@ echo "Generating new MAC address(es) with $GEN..."
 if [ "$MODE" = "all" ]; then
     if [ "$GEN" = "APPLE_MAC_GEN" ]; then
         # RESET_BSSIDS / RANDOMIZE_MACADDR already use APPLE_MAC_GEN.
-        RESET_BSSIDS
-        RANDOMIZE_MACADDR
+    RESET_BSSIDS || exit 1
+    RANDOMIZE_MACADDR || exit 1
     else
         # Explicit RFC-7844 mode: rebuild the same uci writes with
         # UNICAST_MAC_GEN so we bypass the Apple OUI list entirely.
@@ -100,15 +100,15 @@ if [ "$MODE" = "all" ]; then
         uci commit glconfig
     fi
     if [ "$ROTATE_HOSTNAME" = "1" ]; then
-        RANDOMIZE_HOSTNAME
+        RANDOMIZE_HOSTNAME || exit 1
         /etc/init.d/system reload 2>/dev/null || true
     fi
     if [ "$ROTATE_SSID" = "1" ]; then
-        RANDOMIZE_SSID
+        RANDOMIZE_SSID || exit 1
     fi
     echo "Restarting wifi and network..."
-    wifi reload
-    /etc/init.d/network restart
+    wifi reload || exit 1
+    /etc/init.d/network restart || exit 1
     echo
     echo "Done. Clients will need to reconnect (BSSID changed)."
     echo "New MAC visible to upstream: $(uci get glconfig.general.macclone_addr)"
@@ -129,18 +129,18 @@ else
     # avoid. Instead, only bounce the upstream logical interface
     # (typically 'wwan' on repeater builds, 'wan' on wired uplink)
     # so netifd re-attaches with the freshly-committed macaddr.
-    uci set glconfig.general.macclone_addr="$(new_mac)"
-    uci commit glconfig
+    uci set glconfig.general.macclone_addr="$(new_mac)" || exit 1
+    uci commit glconfig || exit 1
     if [ "$ROTATE_HOSTNAME" = "1" ]; then
-        RANDOMIZE_HOSTNAME
+        RANDOMIZE_HOSTNAME || exit 1
         /etc/init.d/system reload 2>/dev/null || true
     fi
     if [ "$ROTATE_SSID" = "1" ]; then
         # SSID change with --uplink still forces AP clients to
         # reconnect; document that explicitly.
         echo "Note: --ssid with --uplink still kicks AP clients."
-        RANDOMIZE_SSID
-        wifi reload
+        RANDOMIZE_SSID || exit 1
+        wifi reload || exit 1
     fi
 
     # Discover which upstream logical interface exists and bounce
@@ -151,12 +151,12 @@ else
     for _iface in wwan wan; do
         if ubus -S call network.interface."$_iface" status >/dev/null 2>&1; then
             echo "Bouncing upstream interface '$_iface'..."
-            ifdown "$_iface" 2>/dev/null || true
+            ifdown "$_iface" 2>/dev/null || { echo "ifdown $_iface failed" >&2; exit 1; }
             # A brief settle window lets netifd finish teardown so
             # the fresh ifup picks up the new macaddr rather than
             # racing the pending state change.
             sleep 1
-            ifup "$_iface" 2>/dev/null || true
+            ifup "$_iface" 2>/dev/null || { echo "ifup $_iface failed" >&2; exit 1; }
             _bounced=1
             break
         fi
@@ -167,7 +167,7 @@ else
         # warn so they know why AP clients might have blinked.
         echo "Warning: no wwan/wan interface found; falling back to full network restart." >&2
         echo "         Set a custom interface via env if needed." >&2
-        /etc/init.d/network restart
+        /etc/init.d/network restart || exit 1
     fi
 
     echo

@@ -56,10 +56,14 @@ case "$MODE" in
 esac
 
 echo "Rotating SSID (current: $current)..."
-RANDOMIZE_SSID
+RANDOMIZE_SSID || { echo "SSID rotation failed" >&2; exit 1; }
 new=$(uci -q get wireless.@wifi-iface[0].ssid || echo "<unset>")
+if [ "$new" = "<unset>" ]; then
+    echo "SSID rotation failed" >&2
+    exit 1
+fi
 echo "Reloading wifi..."
-wifi reload
+wifi reload || { echo "wifi reload failed" >&2; exit 1; }
 
 echo
 echo "Done. New SSID: $new"

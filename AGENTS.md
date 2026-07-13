@@ -68,7 +68,7 @@ real-world consequences. Therefore:
 | `files/lib/blue-merle/tac-list.txt` | Documentation / optional explicit TAC list. Do not add values without authoritative GSMA provenance. Default module mode preserves the physical modem TAC instead. |
 | `files/lib/blue-merle/tac-list-phone.txt` | User-supplied advanced-mode list; intentionally empty and fail-closed until verified TAC allocations are added. |
 | `files/etc/config/blue-merle` | UCI config: `stable_identity` (freeze identity across reboots) and `tac_mode` (module/phone). Both control boot-time and rotation behaviour. |
-| `files/usr/libexec/blue-merle` | RPC entry point for LuCI. Enumerated subcommands only. Resolves TAC mode and modem TTY. `set-tac-mode` writes UCI. |
+| `files/usr/libexec/blue-merle` | RPC entry point for LuCI. Enumerated subcommands only. Resolves TAC/TTY, validates phone TAC data, and writes UCI through exact mode-specific commands. |
 | `Makefile` | `preinst`/`postinst` run on the actual Mudi. Bugs here = broken install. Also scrubs dead filenames and `__pycache__` from staged pkgdir. |
 | `files/usr/share/rpcd/acl.d/luci-app-blue-merle.json` | LuCI ACL. Do not add wildcards. Every subcommand enumerated explicitly. |
 

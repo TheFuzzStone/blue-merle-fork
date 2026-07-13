@@ -13,7 +13,8 @@
 			"file": {
 				"/usr/libexec/blue-merle prepare-sim-swap": [ "exec" ],
 				"/usr/libexec/blue-merle shutdown": [ "exec" ],
-				"/usr/libexec/blue-merle set-tac-mode": [ "exec" ]
+				"/usr/libexec/blue-merle set-tac-mode-module": [ "exec" ],
+				"/usr/libexec/blue-merle set-tac-mode-phone": [ "exec" ]
 			}
 		}
 	}
