@@ -3,19 +3,18 @@
 . /lib/blue-merle/functions.sh
 . /lib/functions/gl_util.sh
 
+_acquire_modem_lock || {
+	mcu_send_message "Another modem operation is active."
+	exit 99
+}
+
 # Resolve modem TTY once at start and pass it to every child (in
 # particular imei_generate.py). Without this the Python side would
 # fall back to /dev/ttyUSB3 and silently fail on shifted enumerations.
 BLUE_MERLE_TTY=$(_resolve_modem_tty)
 export BLUE_MERLE_TTY
 
-# Resolve TAC mode from UCI so imei_generate.py uses the correct TAC
-# pool (module 86xx or phone 35xx). Default is 'module'.
-_tac_mode=$(uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module)
-case "$_tac_mode" in
-    phone) export BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list-phone.txt ;;
-    *)     export BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list.txt ;;
-esac
+_resolve_tac_selection
 
 rm -f /tmp/blue-merle-stage1
 
@@ -44,11 +43,10 @@ until gl_modem AT AT+CFUN=0 | grep -q OK
 do
 	cfun0_tries=$((cfun0_tries+1))
 	if [ "$cfun0_tries" -ge "$max_cfun_retries" ]; then
-		mcu_send_message "ERROR:          CFUN=0 failed. Aborting."
+		mcu_send_message "ERROR:          CFUN=0 failed. Powering off."
 		sleep 3
-		# Continue anyway so we still write a random IMEI and power off
-		# rather than leave the device in an undefined state.
-		break
+		_safe_poweroff
+		exit 1
 	fi
 	mcu_send_message "CFUN=0 failed. Trying again."
 	sleep 1
@@ -60,9 +58,10 @@ do
 	leak=1
 	cfun4_tries=$((cfun4_tries+1))
 	if [ "$cfun4_tries" -ge "$max_cfun_retries" ]; then
-		mcu_send_message "ERROR:          CFUN=4 failed. Aborting."
+		mcu_send_message "ERROR:          CFUN=4 failed. Powering off."
 		sleep 3
-		break
+		_safe_poweroff
+		exit 1
 	fi
 	mcu_send_message "CFUN=4 failed. Trying again."
 	sleep 1
@@ -89,11 +88,11 @@ elif [ -n "$old_imsi" ] && [ "$old_imsi" = "$new_imsi" ]; then
 fi
 
 mcu_send_message "Setting random  IMEI"
-if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r; then
+if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r >/dev/null; then
 	mcu_send_message "ERROR:          IMEI change failed. Reboot and retry."
 	sleep 5
-	# Fall through to shutdown regardless: leaving the device up with an
-	# unknown IMEI state is worse than powering off.
+	_safe_poweroff
+	exit 1
 fi
 
 new_imei=$(READ_IMEI)
@@ -101,29 +100,27 @@ new_imei=$(READ_IMEI)
 # Give the modem a moment to settle after EGMR before comparing.
 sleep 1
 
-if [ -n "$new_imei" ] && [ -n "$old_imei" ] && [ "$old_imei" = "$new_imei" ]; then
+if ! _is_valid_imei_shape "$new_imei"; then
+	mcu_send_message "ERROR:          IMEI readback invalid. Powering off."
+	sleep 3
+	_safe_poweroff
+	exit 1
+elif [ -n "$old_imei" ] && [ "$old_imei" = "$new_imei" ]; then
 	mcu_send_message "WARNING:        Old IMEI equals new IMEI."
 	sleep 3
+	_safe_poweroff
+	exit 1
 else
+	if ! _write_runtime_imei "$new_imei"; then
+		mcu_send_message "ERROR:          volatile IMEI storage unavailable."
+		sleep 3
+		_safe_poweroff
+		exit 1
+	fi
 	# The MCU display cannot show the IMEI without leaking it on a serial
-	# link. Show only a confirmation that a change occurred.
+	# link. Confirm only after readback and volatile storage both succeed.
 	mcu_send_message "IMEI changed.   Powering off."
 	sleep 3
-	# Determine the modem sysfs path dynamically instead of hardcoding
-	# /tmp/modem.1-1.2 (which depends on the USB enumeration).
-	modem_dir=$(ls -d /tmp/modem.*/ 2>/dev/null | head -n1)
-	if [ -z "$modem_dir" ]; then
-		modem_dir=/tmp/modem.1-1.2/
-		mkdir -p "$modem_dir"
-	fi
-	printf '%s' "$new_imei" > "${modem_dir%/}/modem-imei"
-	# Prevent IMEI leak via the eSIM LPA. /root/esim is now a tmpfs mount
-	# (see /etc/init.d/blue-merle-esim-tmpfs), so this value lives only in
-	# RAM and is wiped on shutdown.
-	if [ -d /root/esim ]; then
-		printf '%s' "$new_imei" > /root/esim/imei
-		[ -f /root/esim/log.txt ] && rm -f /root/esim/log.txt
-	fi
 fi
 
 # Log only the event, never the IMEI/IMSI values themselves.

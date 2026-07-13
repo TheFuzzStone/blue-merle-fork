@@ -35,12 +35,6 @@ function callBlueMerle(arg, extraArgs) {
 	});
 }
 
-function maskId(id) {
-	if (!id || id.length < 8)
-		return id || '';
-	return id.substring(0, 4) + '******' + id.substring(id.length - 4);
-}
-
 function readIMEI() { return callBlueMerle('read-imei'); }
 function readIMSI() { return callBlueMerle('read-imsi'); }
 function readTacMode() { return callBlueMerle('read-tac-mode'); }
@@ -90,15 +84,12 @@ function runSimSwapFlow() {
 		])
 	]);
 
-	callBlueMerle('shutdown-modem').then(function() {
-		dlg.appendChild(E('p', {}, _('Generating a random IMEI…')));
-
-		return callBlueMerle('random-imei').then(function(newImei) {
+	callBlueMerle('prepare-sim-swap').then(function(maskedImei) {
 			var spin = document.getElementById(spinnerID);
 			if (spin) spin.style.display = 'none';
 
 			dlg.appendChild(E('div', {}, [
-				E('p', {}, _('New IMEI set (masked): ') + maskId(newImei)),
+				E('p', {}, _('New IMEI set (masked): ') + maskedImei),
 				E('p', { 'class': 'bm-warn' }, [
 					_('Now: (1) shut down the device below, (2) physically swap the SIM, '
 					  + '(3) move to a different location before powering back on. '
@@ -117,7 +108,6 @@ function runSimSwapFlow() {
 					}, [ _('Shutdown now') ])
 				])
 			]));
-		});
 	}).catch(function(err) {
 		var spin = document.getElementById(spinnerID);
 		if (spin) spin.style.display = 'none';
@@ -197,16 +187,6 @@ function handleTacModeChange(newMode, selectEl) {
 	);
 }
 
-function attachRevealHandler(inputEl, fullValueGetter) {
-	var revealed = false;
-	inputEl.addEventListener('click', function() {
-		if (revealed) return;
-		revealed = true;
-		var full = fullValueGetter();
-		if (full) inputEl.value = full;
-	});
-}
-
 return view.extend({
 	load: function() {},
 
@@ -214,13 +194,11 @@ return view.extend({
 		var imeiInputID = 'bm-imei-input';
 		var imsiInputID = 'bm-imsi-input';
 		var tacSelectID = 'bm-tac-select';
-		var imeiCache = '';
-		var imsiCache = '';
 
 		var view = E([], [
 			E('style', { 'type': 'text/css' }, [ css ]),
 			E('h2', {}, _('Blue Merle')),
-			E('p', {}, _('Anonymity enhancements for the GL-E750 Mudi. IMEI and IMSI are shown masked; click a field to reveal it.')),
+			E('p', {}, _('Anonymity enhancements for the GL-E750 Mudi. IMEI and IMSI are returned masked by the router.')),
 
 			E('div', { 'class': 'controls' }, [
 				E('div', {}, [
@@ -285,11 +263,9 @@ return view.extend({
 		]);
 
 		readIMEI().then(function(imei) {
-			imeiCache = imei;
 			var el = document.getElementById(imeiInputID);
 			if (el) {
-				el.value = maskId(imei);
-				attachRevealHandler(el, function() { return imeiCache; });
+				el.value = imei;
 			}
 		}).catch(function() {
 			var el = document.getElementById(imeiInputID);
@@ -297,11 +273,9 @@ return view.extend({
 		});
 
 		readIMSI().then(function(imsi) {
-			imsiCache = imsi;
 			var el = document.getElementById(imsiInputID);
 			if (el) {
-				el.value = maskId(imsi);
-				attachRevealHandler(el, function() { return imsiCache; });
+				el.value = imsi;
 			}
 		}).catch(function() {
 			var el = document.getElementById(imsiInputID);

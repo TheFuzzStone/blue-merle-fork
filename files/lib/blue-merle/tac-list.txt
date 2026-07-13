@@ -1,49 +1,15 @@
-# TAC (Type Allocation Code) list for IMEI generation.
+# Module-mode TAC policy
 #
-# The first 8 digits of an IMEI identify the device model. Operators
-# perform an automatic TAC-lookup at network registration. If the TAC
-# says "Samsung Galaxy S22" but the device behaves like a Linux LTE
-# router (DHCP fingerprint, Cat 6 capabilities, no voice), the operator
-# raises a capability-mismatch flag.
+# Module mode does NOT choose from this file. It preserves the first
+# 8 digits of the IMEI currently reported by the physical modem.
+# This avoids unsupported manufacturer/model claims and does not need
+# licensed GSMA Device Database data.
 #
-# This list contains TACs allocated to LTE *modules* (not consumer
-# smartphones) — devices that behave in the network exactly like the
-# Mudi's Quectel EP06: data-only, LTE Cat 4-6, Linux-based. This makes
-# the TAC-lookup consistent with the device's actual behaviour.
+# This file is retained only as documentation and as an optional place
+# for a user to maintain their own verified TACs. To use an explicit
+# list, set BLUE_MERLE_TAC_LIST to its path before invoking
+# imei_generate.py.
 #
-# Trade-off: the anonymity set is smaller (dozens of industrial gateway
-# models, not millions of smartphones), but consistency at the TAC-lookup
-# layer is more valuable than a large set with an obvious mismatch.
-#
-# If your threat model prefers "blend in with millions of phones" over
-# "look like a consistent industrial gateway", replace this file with
-# smartphone TACs (35xxxxxx range) — but be aware that operators with
-# capability-checking will flag the mismatch.
-#
-# Format: one TAC per line, exactly 8 digits. Lines starting with '#'
-# and blank lines are ignored. Invalid entries are silently skipped.
-#
-# You can edit this file in place; changes take effect at the next IMEI
-# rotation (blue-merle CLI, toggle, or LuCI).
-
-# --- Quectel (Cat 4-6) ---
-86818604
-86439104
-86596603
-86800604
-86818603
-86818602
-86439103
-86439102
-
-# --- Sierra Wireless (Cat 4-6) ---
-86249502
-86241503
-86249503
-
-# --- Telit (Cat 4-6) ---
-86128103
-86247002
-
-# --- u-blox (Cat 4-6) ---
-86387302
+# Do not add TACs without recording an authoritative source, dataset
+# version/date, and the exact allocation record. TAC prefixes alone do
+# not encode manufacturer or device class.

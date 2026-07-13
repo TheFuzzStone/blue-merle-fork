@@ -3,19 +3,18 @@
 . /lib/blue-merle/functions.sh
 . /lib/functions/gl_util.sh
 
+_acquire_modem_lock || {
+	mcu_send_message "Another modem operation is active."
+	exit 99
+}
+
 # Resolve modem TTY once at start and pass it to every child (in
 # particular imei_generate.py). Without this the Python side would
 # fall back to /dev/ttyUSB3 and silently fail on shifted enumerations.
 BLUE_MERLE_TTY=$(_resolve_modem_tty)
 export BLUE_MERLE_TTY
 
-# Resolve TAC mode from UCI so imei_generate.py uses the correct TAC
-# pool (module 86xx or phone 35xx). Default is 'module'.
-_tac_mode=$(uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module)
-case "$_tac_mode" in
-    phone) export BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list-phone.txt ;;
-    *)     export BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list.txt ;;
-esac
+_resolve_tac_selection
 
 if [ ! -f "/tmp/sim_change_start" ]; then
 	echo 0 > /tmp/sim_change_start
@@ -103,9 +102,11 @@ sleep 2
 ## We generate a random IMEI to prevent a leak of the
 ## new SIM's IMSI under the old IMEI in case the modem
 ## still talks to the network
-if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r; then
-	mcu_send_message "WARNING:        interim IMEI set failed."
+if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r >/dev/null; then
+	mcu_send_message "ERROR:          interim IMEI failed. Powering off."
 	sleep 3
+	_safe_poweroff
+	exit 1
 fi
 
 

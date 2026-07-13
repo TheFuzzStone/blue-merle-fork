@@ -50,13 +50,27 @@ start() {
     rm -f "$ESIM_DIR/imei"    2>/dev/null || true
     rm -f "$ESIM_DIR/log.txt" 2>/dev/null || true
 
-    mount -t tmpfs -o mode=0700,size=1M tmpfs "$ESIM_DIR"
+    if ! mount -t tmpfs -o mode=0700,size=1M tmpfs "$ESIM_DIR"; then
+        rm -rf "$tmpstash"
+        logger -p err -t blue-merle "Failed to mount tmpfs on $ESIM_DIR"
+        return 1
+    fi
+
+    if ! awk -v p="$ESIM_DIR" '$2 == p && $3 == "tmpfs" { found=1 } END { exit !found }' /proc/mounts; then
+        rm -rf "$tmpstash"
+        logger -p err -t blue-merle "$ESIM_DIR is not backed by tmpfs after mount"
+        return 1
+    fi
 
     # 3. Restore preserved contents into the tmpfs. Anything sensitive
     #    that we deleted in step 2 will start empty on tmpfs; the LPA
     #    can re-populate it as needed and it dies with the RAM.
     if [ -n "$(ls -A "$tmpstash" 2>/dev/null)" ]; then
-        cp -a "$tmpstash"/. "$ESIM_DIR"/ 2>/dev/null || true
+        cp -a "$tmpstash"/. "$ESIM_DIR"/ 2>/dev/null || {
+            rm -rf "$tmpstash"
+            logger -p err -t blue-merle "Failed to restore eSIM runtime data"
+            return 1
+        }
         # Sensitive files that we deleted from flash must not be
         # re-materialized from the stash either.
         rm -f "$ESIM_DIR/imei"    2>/dev/null || true

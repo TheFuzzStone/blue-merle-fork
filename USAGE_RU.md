@@ -184,8 +184,8 @@ service blue-merle reload
 vi /lib/blue-merle/iphone-models.txt      # hostname (iPhone-15-Pro-Max, …)
 vi /lib/blue-merle/apple-oui.txt          # OUI-префиксы (3c:22:fb, …)
 vi /lib/blue-merle/us-first-names.txt     # имена для SSID (Emma, …)
-vi /lib/blue-merle/tac-list.txt           # module TAC (86xxxxxx, по умолчанию)
-vi /lib/blue-merle/tac-list-phone.txt     # phone TAC (35xxxxxx, fallback)
+vi /lib/blue-merle/tac-list.txt           # опциональный проверенный TAC-список
+vi /lib/blue-merle/tac-list-phone.txt     # пользовательские TAC для phone-mode
 ```
 
 Правила: одна запись на строку, `#` — комментарий. **hostname** —
@@ -195,7 +195,7 @@ vi /lib/blue-merle/tac-list-phone.txt     # phone TAC (35xxxxxx, fallback)
 **TAC** — ровно 8 десятичных цифр. Невалидные записи молча
 игнорируются. `service blue-merle reload` применяет без reboot.
 
-**TAC dual-mode и двухслойная маскировка:**
+**Политика TAC и двухслойная маскировка:**
 
 Apple-маскировка (hostname + SSID + MAC) работает на **WiFi/Ethernet
 слое** — это видят соседние сканеры и upstream-сети. TAC-список
@@ -207,8 +207,8 @@ TAC mode) или UCI:
 
 | Режим | Файл | Диапазон | Когда использовать |
 |---|---|---|---|
-| **module** (по умолчанию) | `tac-list.txt` | 86xxxxxx | TAC от LTE-модулей Quectel/Sierra/Telit/u-blox. Соответствует реальному поведению устройства — нет флага capability-mismatch. Меньший anonymity set. |
-| **phone** (fallback) | `tac-list-phone.txt` | 35xxxxxx + 86xxxxxx | 78 смартфонных TAC (Samsung, Apple, Xiaomi, Huawei, Google, OnePlus). Больший anonymity set, но TAC говорит «телефон», а устройство ведёт себя как модем. Используйте если SIM не работает в module-режиме. |
+| **module** (по умолчанию) | IMEI физического модема | Сохраняет TAC, реально прочитанный с модема. Не предполагает внешнюю TAC-базу или производителя. |
+| **phone** (advanced) | `tac-list-phone.txt` | Только TAC, добавленные пользователем. Файл поставляется пустым; режим отказывает до добавления проверенных allocation records с авторитетным источником GSMA. |
 
 Переключение через UCI:
 ```sh
@@ -218,7 +218,8 @@ uci commit blue-merle
 
 Или через LuCI: откройте страницу Blue Merle → dropdown TAC mode →
 выберите Phone → подтвердите. Изменение применяется при следующей
-смене IMEI.
+смене IMEI. Нельзя определять класс/производителя только по префиксу
+`35`/`86` — нужен авторитетный GSMA record.
 
 **Переменные окружения** (для скриптов / отладки):
 
@@ -268,7 +269,7 @@ logread | grep blue-merle
 `Refreshed BSSIDs (uci) after ifdown of wlanX — next ifup will use them`,
 `Rotated upstream macclone_addr after ifup of wwan`.
 
-**Полный маскированный отчёт** — используйте перед просьбой о помощи:
+**Отредактированный диагностический отчёт** — используйте перед просьбой о помощи:
 
 ```sh
 # С ПК:
@@ -276,7 +277,7 @@ scp -O dist/blue-merle-diag.sh root@192.168.8.1:/tmp/
 ssh root@192.168.8.1 'sh /tmp/blue-merle-diag.sh'
 # Отчёт в /tmp/blue-merle-diag.out на Mudi.
 scp -O root@192.168.8.1:/tmp/blue-merle-diag.out ./
-less blue-merle-diag.out                # ID маскированы; безопасно шэрить
+less blue-merle-diag.out                # проверьте перед публичной отправкой
 ```
 
 **Модем не отвечает:**
@@ -308,7 +309,7 @@ logread | grep -iE 'blue-merle.*[0-9]{14,15}'
 **Unit-тесты** (dev-машина, не на Mudi):
 
 ```sh
-python3 tests/run_all.py     # 44 passed, 0 failed
+python3 tests/run_all.py     # все тесты должны пройти
 ```
 
 ---
@@ -359,15 +360,8 @@ blue-merle    # → 'r' (random), 'm' (reset modem)
 Модем вернётся через ~30–60 с. **Минус:** та же локация → оператор
 видит смену IMEI на том же месте.
 
-**Ежедневная автоматическая ротация IMEI** (продвинуто, рискованно —
-смена IMEI без смены SIM и локации связывает сессии):
-
-```sh
-cat > /etc/crontabs/root <<'EOF'
-0 3 * * * /usr/libexec/blue-merle random-imei && /usr/libexec/blue-merle shutdown
-EOF
-service cron restart
-```
+**Автоматическая смена IMEI намеренно не поддерживается.** Смена без
+физической замены SIM и локации облегчает корреляцию сессий.
 
 **Восстановить оригинальный IMEI:**
 
@@ -392,10 +386,9 @@ blue-merle-newssid                        # только SSID
 blue-merle-newssid --dry-run              # preview
 
 # Чтение текущих значений (LuCI использует их тоже)
-/usr/libexec/blue-merle read-imei
-/usr/libexec/blue-merle read-imsi
-/usr/libexec/blue-merle random-imei       # сгенерировать + записать
-/usr/libexec/blue-merle shutdown-modem    # AT+CFUN=4
+/usr/libexec/blue-merle read-imei         # маскированный вывод
+/usr/libexec/blue-merle read-imsi         # маскированный вывод
+/usr/libexec/blue-merle prepare-sim-swap # атомарно RF-off + interim IMEI
 /usr/libexec/blue-merle shutdown          # чистое выключение через MCU
 
 # Python IMEI-инструмент (advanced)

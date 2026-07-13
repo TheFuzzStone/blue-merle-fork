@@ -20,6 +20,8 @@
 
 [ "$ACTION" = "ifup" ] || exit 0
 
+[ "$(uci -q get blue-merle.main.stable_identity 2>/dev/null || echo 0)" = "1" ] && exit 0
+
 # Only react to upstream-facing interfaces.
 case "$INTERFACE" in
     wwan|wan|wwan_*|wan_*) ;;

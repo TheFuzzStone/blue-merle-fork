@@ -104,40 +104,17 @@ def test_validate_rejects_non_digit():
     assert m.validate_imei("49015420323751a") is False
 
 
-# ---- TAC list loading ----
+# ---- TAC selection policy ----
 
 def test_tac_list_file_exists():
-    """The tac-list.txt file must exist in the repo."""
+    """Documentation placeholder for verified module TACs exists."""
     assert _TAC_FILE_MODULE.exists(), f"tac-list.txt not found at {_TAC_FILE_MODULE}"
 
 
-def test_tac_list_non_empty():
-    tacs = _load_tac_list_from_file()
-    assert len(tacs) >= 5, f"tac-list.txt has only {len(tacs)} entries"
-
-
-def test_tac_list_all_8_digits():
-    """Every TAC must be exactly 8 decimal digits."""
-    tacs = _load_tac_list_from_file()
-    for tac in tacs:
-        assert re.fullmatch(r"[0-9]{8}", tac), f"invalid TAC: {tac!r}"
-
-
-def test_tac_list_all_module_range():
-    """All TACs should be in the 86xxxxxx (LTE-module) range, not
-    35xxxxxx (smartphone). This is the core of the TAC-filter feature:
-    prevent operator TAC-lookup mismatch.
-    """
-    tacs = _load_tac_list_from_file()
-    for tac in tacs:
-        assert tac.startswith("86"), \
-            f"TAC {tac} is not in the 86xxxxxx module range — " \
-            f"smartphone TACs cause capability-mismatch flags"
-
-
-def test_tac_list_no_duplicates():
-    tacs = _load_tac_list_from_file()
-    assert len(tacs) == len(set(tacs)), f"duplicate TACs: {tacs}"
+def test_project_tac_files_are_empty_without_provenance():
+    """The project must not ship unattributed GSMA TAC allocations."""
+    assert _load_tac_list_from_file() == []
+    assert _load_phone_tac_list_from_file() == []
 
 
 def test_load_tac_list_from_env():
@@ -164,10 +141,7 @@ def test_load_tac_list_from_env():
         os.unlink(tmp_path)
 
 
-def test_load_tac_list_fallback_on_missing_file():
-    """If the TAC file doesn't exist, _load_tac_list() should return
-    the hardcoded fallback list (also 86xxxxxx range).
-    """
+def test_explicit_missing_tac_list_fails_closed():
     old = os.environ.get("BLUE_MERLE_TAC_LIST")
     os.environ["BLUE_MERLE_TAC_LIST"] = "/nonexistent/path/tac-list.txt"
     try:
@@ -175,10 +149,12 @@ def test_load_tac_list_fallback_on_missing_file():
             if mod_name == "imei_generate":
                 del sys.modules[mod_name]
         import imei_generate as fresh_m
-        tacs = fresh_m._load_tac_list()
-        assert len(tacs) > 0, "fallback list is empty"
-        assert all(t.startswith("86") for t in tacs), \
-            "fallback TACs should all be 86xxxxxx module range"
+        try:
+            fresh_m._load_tac_list()
+        except RuntimeError as exc:
+            assert "not readable" in str(exc)
+        else:
+            raise AssertionError("missing explicit TAC list must fail closed")
     finally:
         if old is None:
             del os.environ["BLUE_MERLE_TAC_LIST"]
@@ -188,33 +164,21 @@ def test_load_tac_list_fallback_on_missing_file():
 
 # ---- generate_imei ----
 
+_TEST_TAC_LIST = ["12345678", "87654321"]
+
 def test_random_generation_is_luhn_valid():
     """Every generated IMEI must be Luhn-valid and its TAC must come
     from the tac-list.txt file (not from the old hardcoded smartphone
     list).
     """
     m.mode = m.Modes.RANDOM
-    tacs = _load_tac_list_from_file()
+    tacs = _TEST_TAC_LIST
     for _ in range(200):
         imei = m.generate_imei(tacs, None)
         assert len(imei) == 15
         assert imei.isdigit()
         assert m.validate_imei(imei), f"generated invalid IMEI: {imei}"
-        # TAC comes from the curated module list.
-        assert imei[:8] in tacs, \
-            f"TAC {imei[:8]} not in tac-list.txt — smartphone TAC leaked?"
-
-
-def test_random_generation_uses_module_range():
-    """All generated IMEIs must start with 86 (module range), not 35
-    (smartphone range). This is the regression guard for the TAC-filter.
-    """
-    m.mode = m.Modes.RANDOM
-    tacs = _load_tac_list_from_file()
-    for _ in range(100):
-        imei = m.generate_imei(tacs, None)
-        assert imei.startswith("86"), \
-            f"IMEI {imei} starts with {imei[:2]} — expected 86 (module range)"
+        assert imei[:8] in tacs
 
 
 def test_random_tail_is_uniform_over_digits():
@@ -222,7 +186,7 @@ def test_random_tail_is_uniform_over_digits():
     the historical random.sample() prevented any repeats in the tail).
     """
     m.mode = m.Modes.RANDOM
-    tacs = _load_tac_list_from_file()
+    tacs = _TEST_TAC_LIST
     seen_repeat = False
     for _ in range(500):
         imei = m.generate_imei(tacs, None)
@@ -235,7 +199,7 @@ def test_random_tail_is_uniform_over_digits():
 
 def test_deterministic_is_reproducible():
     m.mode = m.Modes.DETERMINISTIC
-    tacs = _load_tac_list_from_file()
+    tacs = _TEST_TAC_LIST
     seed = b"310150123456789"
     a = m.generate_imei(tacs, seed)
     b = m.generate_imei(tacs, seed)
@@ -245,77 +209,30 @@ def test_deterministic_is_reproducible():
 
 def test_deterministic_differs_across_imsis():
     m.mode = m.Modes.DETERMINISTIC
-    tacs = _load_tac_list_from_file()
+    tacs = _TEST_TAC_LIST
     a = m.generate_imei(tacs, b"310150111111111")
     b = m.generate_imei(tacs, b"310150222222222")
     # Extremely unlikely to collide by chance.
     assert a != b
 
 
-def test_deterministic_uses_module_range():
-    """Deterministic IMEIs must also use module TACs, not smartphone."""
-    m.mode = m.Modes.DETERMINISTIC
-    tacs = _load_tac_list_from_file()
-    imei = m.generate_imei(tacs, b"310150123456789")
-    assert imei.startswith("86"), \
-        f"deterministic IMEI {imei} not in module range"
-
-
-# ---- Phone-mode TAC list (fallback) ----
+# ---- Phone-mode policy ----
 
 def test_phone_tac_list_file_exists():
     assert _TAC_FILE_PHONE.exists(), f"tac-list-phone.txt not found at {_TAC_FILE_PHONE}"
 
 
-def test_phone_tac_list_non_empty():
-    tacs = _load_phone_tac_list_from_file()
-    assert len(tacs) >= 20, f"tac-list-phone.txt has only {len(tacs)} entries"
-
-
-def test_phone_tac_list_all_8_digits():
-    tacs = _load_phone_tac_list_from_file()
-    for tac in tacs:
-        assert re.fullmatch(r"[0-9]{8}", tac), f"invalid phone TAC: {tac!r}"
-
-
-def test_phone_tac_list_no_duplicates():
-    tacs = _load_phone_tac_list_from_file()
-    assert len(tacs) == len(set(tacs)), f"duplicate phone TACs"
-
-
-def test_phone_tac_list_has_multiple_manufacturers():
-    """The phone TAC list should span multiple manufacturers (Samsung,
-    Apple, Xiaomi, Huawei, Google, OnePlus) — not just one brand.
-    We check that both 35xxxxxx and 86xxxxxx prefixes are present
-    (Samsung/Apple use 35, Xiaomi/Huawei use 86).
-    """
-    tacs = _load_phone_tac_list_from_file()
-    prefixes_35 = [t for t in tacs if t.startswith("35")]
-    prefixes_86 = [t for t in tacs if t.startswith("86")]
-    assert len(prefixes_35) > 0, "no 35xx TACs in phone list"
-    assert len(prefixes_86) > 0, "no 86xx TACs in phone list"
-
-
-def test_phone_mode_generates_luhn_valid_imeis():
-    """When using the phone TAC list, all generated IMEIs must still
-    be Luhn-valid and their TAC must come from the phone list.
-    """
-    m.mode = m.Modes.RANDOM
-    phone_tacs = _load_phone_tac_list_from_file()
-    for _ in range(100):
-        imei = m.generate_imei(phone_tacs, None)
-        assert len(imei) == 15
-        assert imei.isdigit()
-        assert m.validate_imei(imei), f"generated invalid IMEI: {imei}"
-        assert imei[:8] in phone_tacs, \
-            f"TAC {imei[:8]} not in phone tac-list"
-
-
-def test_module_and_phone_lists_do_not_overlap():
-    """The module and phone TAC lists must not share any TAC — they
-    represent different device classes and must be disjoint.
-    """
-    module_tacs = set(_load_tac_list_from_file())
-    phone_tacs = set(_load_phone_tac_list_from_file())
-    overlap = module_tacs & phone_tacs
-    assert not overlap, f"module and phone TAC lists overlap: {overlap}"
+def test_exact_tac_env_selects_one_tac():
+    old = os.environ.get("BLUE_MERLE_TAC")
+    os.environ["BLUE_MERLE_TAC"] = "12345678"
+    try:
+        for mod_name in list(sys.modules):
+            if mod_name == "imei_generate":
+                del sys.modules[mod_name]
+        import imei_generate as fresh_m
+        assert fresh_m._load_tac_list() == ["12345678"]
+    finally:
+        if old is None:
+            del os.environ["BLUE_MERLE_TAC"]
+        else:
+            os.environ["BLUE_MERLE_TAC"] = old

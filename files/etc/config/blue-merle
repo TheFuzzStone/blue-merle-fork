@@ -26,15 +26,10 @@ config main 'main'
 
 	# option tac_mode 'module'
 	#
-	#     module (default): use LTE-module TACs (86xxxxxx — Quectel,
-	#                       Sierra, Telit, u-blox). Matches the device's
-	#                       actual behaviour; avoids operator capability-
-	#                       mismatch flags. Smaller anonymity set.
-	#     phone          : use smartphone TACs (35xxxxxx — Samsung,
-	#                       Apple, Xiaomi, etc.). Larger anonymity set
-	#                       but TAC says "phone" while device behaves
-	#                       like a modem — may trigger flags. Use this
-	#                       if your SIM doesn't work in module mode.
+	#     module (default): preserve the TAC currently reported by the
+	#                       physical modem. No unverified TAC database.
+	#     phone          : use TACs explicitly supplied by the user in
+	#                       tac-list-phone.txt. Fails closed when empty.
 	#
 	# Switchable via LuCI (Blue Merle → TAC mode) or uci set.
 	option tac_mode 'module'

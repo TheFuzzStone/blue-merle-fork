@@ -99,7 +99,7 @@ Real bugs that made upstream not do what it says on the tin.
 | Lua `luhn_digit` returns `0` for `sum%10==0` (later removed with the whole dead Lua path) | Previously returned `10`, producing 16-char IMEIs. |
 | Python: `random.sample` → `random.choices` | Sampling without replacement removed repeated digits from the tail — a statistical fingerprint of blue-merle IMEIs. |
 | `_rand16` reads `/proc/sys/kernel/random/uuid` instead of `od`/`hexdump` | Stock Mudi busybox has no `od`; the old picker returned empty → index 1 forever (`Aaron`, `iPhone-X` on every reboot). |
-| `fcntl.flock` on the serial fd in `imei_generate.py` | pyserial's `exclusive=True` only blocks new `open()`s; a zombie process holding the fd could interleave AT bytes. Two kernel layers (TIOCEXCL + advisory flock) prevent that. |
+| Serial-fd flock plus one shared operation lock | pyserial's `exclusive=True` only blocks new `open()`s. The Python fd lock protects raw serial access; `/tmp/blue-merle-modem.lock` serializes the full CLI/toggle/LuCI state machine including `gl_modem`. |
 | Central `_resolve_modem_tty` helper used in every caller | `/dev/ttyUSB3` was hard-coded in stage1/stage2/libexec while only the CLI probed dynamically — a shifted USB enumeration silently broke toggle-driven and LuCI SIM-swap. |
 | stage1 persists real `old_imei`/`old_imsi` on tmpfs | Upstream shared them as shell variables between processes → always empty in stage2 → "Did you swap the SIM?" unreachable. |
 | Every `until … done` loop bounded | Unbounded retries hung until the outer 90 s timeout, sometimes leaving the modem mid-transition. |
@@ -108,7 +108,7 @@ Real bugs that made upstream not do what it says on the tin.
 | IMSI regex accepts 14–15 digits | Fixed-15 broke deterministic mode on shorter IMSIs; ITU-T E.212 allows both. |
 | Serial reads loop until `OK`/`ERROR` | A single 64-byte read could miss fragmented modem responses. |
 | Python: `exit(1)` instead of `exit(-1)` | POSIX turned `-1` into 255, confusing shell wrappers. |
-| `flock -n -E 99` in CLI | Without `-E`, lock-contention exit code (1) collided with the child's own `exit 1` (e.g. user answers 'n' at the prompt), so the "another operation in progress" message printed on every rejected prompt. |
+| One portable modem-operation lock | CLI, toggle and LuCI now share `/tmp/blue-merle-modem.lock`; all `gl_modem` and pyserial state transitions are serialized without util-linux-only `flock -E`. |
 | Hotplug BSSID rewrite moved from `ifup` to `ifdown`, run synchronously | Writing on ifup was off-by-one — the new BSSID only surfaced at the *next* `wifi reload`. Ifdown writes it in time for the immediately-following ifup. Synchronous execution prevents a race with that follow-up ifup. |
 | `blue-merle-newmac --uplink` bounces only `wwan`/`wan` via `ifdown/ifup` | Upstream's `service network restart` also cycled wlan → AP clients were kicked, contrary to the flag's promise. |
 
@@ -122,7 +122,7 @@ alone. This fork rotates a coherent Apple identity end-to-end.
 | Apple OUI pool (`apple-oui.txt`, 30 real Apple prefixes) | Consistent story: MAC vendor lookup matches the iPhone hostname & SSID. |
 | iPhone hostname pool (`iphone-models.txt`, 25 models) | Replaces `Mudi-<serial>` — a stable per-device fingerprint that also identified the model. |
 | Personal-Hotspot SSID rotation (`<Name>'s iPhone`, 244 US names) | Replaces `GL-E750-<serial>` — WIGLE-indexable and model-identifying. |
-| Dual-mode TAC filter (`tac-list.txt` + `tac-list-phone.txt`, 14 module + 78 phone TACs) | Upstream used smartphone TACs (`35xxxxxx`) which cause a capability-mismatch flag at the operator's TAC-lookup: "Samsung Galaxy" TAC on a data-only LTE modem with Linux DHCP. Module TACs (`86xxxxxx` — Quectel, Sierra, Telit, u-blox) match the device's actual behaviour. Phone TACs (6 manufacturers: Samsung, Apple, Xiaomi, Huawei, Google, OnePlus) serve as fallback when operators block consumer SIMs on module TACs. Switchable via LuCI dropdown or `uci set blue-merle.main.tac_mode=phone`. |
+| TAC policy without guessed GSMA data | Module mode preserves the TAC actually reported by the physical modem. Phone mode is user-supplied and fails closed until `tac-list-phone.txt` contains TACs with documented authoritative provenance. TAC prefixes do not encode manufacturer/device class, so this fork no longer ships guessed assignments. |
 | Ethernet MAC + hostname + per-uplink MAC rotation | Upstream only touched WiFi MACs at boot → Ethernet and hostname stayed as factory fingerprints between locations. |
 | `blue-merle-newmac`, `blue-merle-newssid` CLIs (`--uplink`, `--full`, `--dry-run`, `--pure-random`) | On-demand rotation without a reboot; different modes for different needs (repeater-switch, full identity change, RFC-7844 mode). |
 | Hotplug BSSID rewrite on WiFi `ifdown` (`30-blue-merle-bssid-on-ifdown`) | Every `wifi reload` now yields a fresh BSSID in the air on the very next ifup. |
@@ -153,7 +153,7 @@ alone. This fork rotates a coherent Apple identity end-to-end.
 
 ### 6. Tests
 
-Upstream shipped no test suite. This fork has **44 unit tests** under
+Upstream shipped no test suite. This fork has a regression suite under
 `tests/` covering Luhn digit correctness (incl. the all-zero edge
 case that regressed in Lua), IMEI generation and validation, entropy
 of the random tail, deterministic-mode reproducibility, MAC bit
@@ -163,7 +163,7 @@ patterns (RFC 7844 + Apple OUI), hostname/SSID pool validity,
 one guard.
 
 ```sh
-python3 tests/run_all.py     # 44 passed, 0 failed
+python3 tests/run_all.py
 ```
 
 ---
@@ -251,6 +251,11 @@ make -j"$(nproc)" package/blue-merle/compile V=s
   contents are recoverable via chip-off — `shred` does not help on
   NAND (wear leveling). Physical destruction is the only reliable
   countermeasure.
+- **Flash history from UCI commits.** Boot-time identity rotations are
+  committed through UCI so netifd/hostapd can consume them; NAND
+  wear-leveling may retain older SSID/MAC/hostname values in stale
+  erase blocks. A volatile UCI overlay was not enabled because it risks
+  breaking GL.iNet's network stack without dedicated hardware testing.
 
 blue-merle-fork raises the cost of casual tracking and forensic
 recovery. It does not make you invisible to a determined adversary

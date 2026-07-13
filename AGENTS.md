@@ -63,10 +63,10 @@ real-world consequences. Therefore:
 |---|---|
 | `files/lib/blue-merle/functions.sh` | Central helpers — MAC/hostname/SSID randomizers, IMEI readers, `_rand16`, `_resolve_modem_tty`. Every function used by init, CLI and toggle. |
 | `files/usr/bin/blue-merle-switch-stage{1,2}` | Toggle-driven SIM swap. Runs without TTY. Split across two processes with tmpfs state. Timing-sensitive around `AT+CFUN=4` (asynchronous). Both now resolve TAC mode from UCI before calling Python. |
-| `files/usr/bin/blue-merle` | Interactive CLI. `flock`-serialized (`-E 99` for contention). Must not deadlock; every `until` must be bounded. Also resolves TAC mode from UCI. |
+| `files/usr/bin/blue-merle` | Interactive CLI. Uses the shared fd-based modem lock. Must not deadlock; every `until` must be bounded. |
 | `files/lib/blue-merle/imei_generate.py` | Talks to modem over pyserial with `exclusive=True` + `fcntl.flock`. Loads TAC list from external file via `_load_tac_list()` with fallback. |
-| `files/lib/blue-merle/tac-list.txt` | Module TACs (86xxxxxx — Quectel, Sierra, Telit, u-blox). Default IMEI TAC pool. Editing wrong = broken IMEI generation or operator flags. |
-| `files/lib/blue-merle/tac-list-phone.txt` | Smartphone TACs (35xxxxxx + 86xxxxxx — Samsung, Apple, Xiaomi, etc.). Fallback pool for operators that block module TACs. |
+| `files/lib/blue-merle/tac-list.txt` | Documentation / optional explicit TAC list. Do not add values without authoritative GSMA provenance. Default module mode preserves the physical modem TAC instead. |
+| `files/lib/blue-merle/tac-list-phone.txt` | User-supplied advanced-mode list; intentionally empty and fail-closed until verified TAC allocations are added. |
 | `files/etc/config/blue-merle` | UCI config: `stable_identity` (freeze identity across reboots) and `tac_mode` (module/phone). Both control boot-time and rotation behaviour. |
 | `files/usr/libexec/blue-merle` | RPC entry point for LuCI. Enumerated subcommands only. Resolves TAC mode and modem TTY. `set-tac-mode` writes UCI. |
 | `Makefile` | `preinst`/`postinst` run on the actual Mudi. Bugs here = broken install. Also scrubs dead filenames and `__pycache__` from staged pkgdir. |
@@ -97,7 +97,7 @@ cp $SDK/bin/packages/mips_24kc/base/blue-merle_*.ipk ./dist/
 ## Test
 
 ```sh
-python3 tests/run_all.py   # 60 tests; must all pass
+python3 tests/run_all.py   # all tests must pass (count may grow)
 ```
 
 If pytest is not available, `run_all.py` is a lightweight replacement.

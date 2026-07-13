@@ -47,10 +47,10 @@ start() {
 		logger -p notice -t blue-merle \
 			"stable_identity=1: no rotation on boot; use blue-merle-newmac --full to rotate manually"
 	else
-		RESET_BSSIDS
-		RANDOMIZE_MACADDR
-		RANDOMIZE_HOSTNAME
-		RANDOMIZE_SSID
+		RESET_BSSIDS || return 1
+		RANDOMIZE_MACADDR || return 1
+		RANDOMIZE_HOSTNAME || return 1
+		RANDOMIZE_SSID || return 1
 	fi
 	_announce_ssid_on_mcu
 }
@@ -63,8 +63,9 @@ reload() {
 		logger -p notice -t blue-merle \
 			"stable_identity=1: reload is a no-op; use blue-merle-newmac --full to rotate manually"
 	else
-		RESET_BSSIDS
-		RANDOMIZE_MACADDR
-		RANDOMIZE_SSID
+		RESET_BSSIDS || return 1
+		RANDOMIZE_MACADDR || return 1
+		RANDOMIZE_HOSTNAME || return 1
+		RANDOMIZE_SSID || return 1
 	fi
 }

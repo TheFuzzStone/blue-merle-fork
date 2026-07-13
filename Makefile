@@ -31,11 +31,8 @@ define Build/Compile
 endef
 
 define Package/blue-merle/install
-	# Strip any stray Python bytecode / editor backups from BOTH the source
-	# tree (in case dev tests left them) and the staged package directory
-	# after copying. The staged-dir cleanup is the authoritative one: it
-	# guarantees the ipk never ships bytecode.
-	find ./files \( -name __pycache__ -o -name '*.pyc' -o -name '*~' \) -exec rm -rf {} + 2>/dev/null || true
+	# Copy first, then scrub the staged directory. Builds must never mutate
+	# the source checkout.
 	$(CP) ./files/* $(1)/
 	$(INSTALL_BIN) ./files/etc/init.d/* $(1)/etc/init.d/
 	$(INSTALL_BIN) ./files/etc/gl-switch.d/* $(1)/etc/gl-switch.d/
@@ -140,18 +137,49 @@ define Package/blue-merle/postinst
 
 	uci set switch-button.@main[0].func='sim'
 	uci commit switch-button
+	# Capture the physical modem's current TAC once. Storing only the
+	# first 8 digits avoids retaining the full IMEI while allowing module
+	# mode to preserve a real, device-proven TAC without a guessed GSMA DB.
+	if ! uci -q get blue-merle.main.original_tac >/dev/null 2>&1; then
+		original_imei=$$(gl_modem AT AT+GSN 2>/dev/null | grep -E '^[0-9]{15}$$' | head -n1)
+		case $$original_imei in
+			[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+				uci set blue-merle.main.original_tac="$${original_imei%???????}"
+				uci commit blue-merle
+				;;
+		esac
+	fi
 
 	# Enable the new services introduced by this fork.
 	/etc/init.d/blue-merle-esim-tmpfs enable 2>/dev/null || true
 	/etc/init.d/blue-merle enable 2>/dev/null || true
 	/etc/init.d/volatile-client-macs enable 2>/dev/null || true
 
-	/etc/init.d/gl_clients start 2>/dev/null || true
+	# Make privacy mounts effective immediately; enabling without starting
+	# left an install-to-reboot window where identifiers could hit flash.
+	/etc/init.d/blue-merle-esim-tmpfs start || exit 1
+	/etc/init.d/volatile-client-macs start || exit 1
+	awk '$$2 == "/root/esim" && $$3 == "tmpfs" { esim=1 }
+	     $$2 == "/etc/oui-tertf" && $$3 == "tmpfs" { clients=1 }
+	     END { exit !(esim && clients) }' /proc/mounts || exit 1
+
+	/etc/init.d/gl_clients start 2>/dev/null || exit 1
 
 	# Announce completion on the MCU screen if we have one.
 	if [ -c /dev/ttyS0 ]; then
 		printf '{"msg":"Successfully installed Blue Merle"}\n' > /dev/ttyS0
 	fi
+endef
+
+define Package/blue-merle/prerm
+	#!/bin/sh
+	[ -n "$${IPKG_INSTROOT}" ] && exit 0
+	/etc/init.d/gl_clients stop 2>/dev/null || true
+	/etc/init.d/blue-merle disable 2>/dev/null || true
+	/etc/init.d/blue-merle-esim-tmpfs disable 2>/dev/null || true
+	/etc/init.d/volatile-client-macs disable 2>/dev/null || true
+	/etc/init.d/volatile-client-macs stop 2>/dev/null || true
+	/etc/init.d/blue-merle-esim-tmpfs stop 2>/dev/null || true
 endef
 
 define Package/blue-merle/postrm

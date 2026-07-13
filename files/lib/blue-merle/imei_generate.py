@@ -51,51 +51,42 @@ class Modes(Enum):
 # Example IMEI: 490154203237518
 IMEI_BODY_LENGTH = 14  # digits before the Luhn check digit
 
-# Fallback TAC list — used only if the external tac-list.txt file is
-# missing or unreadable. These are LTE-module TACs (86xxxxxx range)
-# that match the Quectel EP06's behaviour, not smartphone TACs.
-# The primary list lives in /lib/blue-merle/tac-list.txt and is
-# user-editable; see BLUE_MERLE_TAC_LIST env override below.
-_FALLBACK_TAC_LIST = [
-    "86818604", "86439104", "86596603", "86800604",
-    "86818603", "86818602", "86439103", "86439102",
-    "86249502", "86241503", "86249503",
-    "86128103", "86247002",
-    "86387302",
-]
+def _load_tac_list(tty: Optional[str] = None) -> list[str]:
+    """Return a strictly validated TAC selection.
 
+    ``BLUE_MERLE_TAC`` selects one exact, previously captured TAC.
+    ``BLUE_MERLE_TAC_LIST`` selects an explicit user-provided list.
+    If neither is set, preserve the TAC currently reported by the modem.
 
-def _load_tac_list() -> list[str]:
-    """Load the TAC list from the external file, falling back to the
-    hardcoded list if the file is missing, empty, or contains no valid
-    entries.
-
-    The file path can be overridden via the BLUE_MERLE_TAC_LIST
-    environment variable (used by tests and power users). The default
-    path is /lib/blue-merle/tac-list.txt on the device.
-
-    Only lines matching exactly 8 decimal digits are accepted; comments
-    (#) and blank lines are ignored. This mirrors the validation in
-    _pick_random_line in functions.sh.
+    There is deliberately no manufacturer/model fallback database here:
+    GSMA TAC attribution is licensed data and unverified TAC claims can
+    make the device more distinctive or prevent registration.
     """
-    path = Path(os.environ.get(
-        "BLUE_MERLE_TAC_LIST",
-        "/lib/blue-merle/tac-list.txt",
-    ))
+    tty = tty or DEFAULT_TTY
+    exact_tac = os.environ.get("BLUE_MERLE_TAC", "")
+    if re.fullmatch(r"[0-9]{8}", exact_tac):
+        return [exact_tac]
+
+    explicit_path = os.environ.get("BLUE_MERLE_TAC_LIST")
+    if not explicit_path:
+        current_imei = get_imei(tty)
+        if re.fullmatch(rb"[0-9]{15}", current_imei):
+            return [current_imei[:8].decode("ascii")]
+        raise RuntimeError("Cannot read current modem TAC")
+
+    path = Path(explicit_path)
     tacs: list[str] = []
     try:
         for raw in path.read_text(encoding="utf-8").splitlines():
             line = raw.split("#", 1)[0].strip()
             if re.fullmatch(r"[0-9]{8}", line):
                 tacs.append(line)
-    except (OSError, UnicodeDecodeError):
-        log.debug("TAC list %s not readable, using fallback", path)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise RuntimeError(f"TAC list {path} is not readable: {exc}") from exc
     if tacs:
         log.debug("Loaded %d TACs from %s", len(tacs), path)
         return tacs
-    log.debug("TAC list %s empty or invalid, using fallback (%d entries)",
-              path, len(_FALLBACK_TAC_LIST))
-    return _FALLBACK_TAC_LIST
+    raise RuntimeError(f"TAC list {path} contains no valid 8-digit TACs")
 
 # Serial defaults. The TTY can be overridden by the BLUE_MERLE_TTY env
 # variable so shell wrappers can point us at a different port when the

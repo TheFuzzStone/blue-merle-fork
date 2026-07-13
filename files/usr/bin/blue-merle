@@ -3,35 +3,17 @@
 # Interactive CLI for changing the Mudi's IMEI. See also the toggle-driven
 # workflow in /usr/bin/blue-merle-switch-stage{1,2} and the LuCI view.
 
-# Serialize with any other blue-merle invocation that touches the modem
-# (LuCI SIM-swap, toggle stages). Concurrent access to /dev/ttyUSB3 mixes
-# AT command streams and can leave the modem in an inconsistent state.
-#
-# NOTE 1: earlier versions used `exec flock -n ... || {...}` which was
-# broken — exec replaces the shell, so the || fallback message was
-# unreachable when flock failed to acquire the lock.
-#
-# NOTE 2: without -E, `flock -n` returns exit code 1 both on lock
-# contention AND when the child script exits with 1 (e.g. user
-# answered 'n' to the SIM-swap prompt). That collision made us print
-# the "another operation in progress" message on every rejected
-# prompt. -E lets us pick a distinct code (99) exclusively for the
-# contention case, so the child's own non-zero exits pass through
-# transparently.
-LOCK=/tmp/blue-merle-cli.lock
-if [ "${BLUE_MERLE_LOCKED:-}" != "1" ]; then
-	export BLUE_MERLE_LOCKED=1
-	if ! flock -n -E 99 "$LOCK" "$0" "$@"; then
-		rc=$?
-		if [ "$rc" = "99" ]; then
-			echo "Another blue-merle operation is in progress. Try again shortly." >&2
-		fi
-		exit "$rc"
-	fi
-	exit 0
-fi
-
 . /lib/blue-merle/functions.sh
+
+_sim_swap_pending && {
+	echo "A hardware-toggle SIM swap is awaiting stage 2. Complete it before using the CLI." >&2
+	exit 1
+}
+
+_acquire_modem_lock || {
+	echo "Another modem operation is in progress. Try again shortly." >&2
+	exit 99
+}
 
 # Resolve the modem's AT-command TTY (see _resolve_modem_tty in
 # functions.sh). Falls back gracefully if the port has shifted after a
@@ -45,13 +27,7 @@ if [ ! -c "$BLUE_MERLE_TTY" ]; then
 fi
 export BLUE_MERLE_TTY
 
-# Resolve TAC mode from UCI so imei_generate.py uses the correct TAC
-# pool (module 86xx or phone 35xx). Default is 'module'.
-_tac_mode=$(uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module)
-case "$_tac_mode" in
-    phone) export BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list-phone.txt ;;
-    *)     export BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list.txt ;;
-esac
+_resolve_tac_selection
 
 printf 'Swap SIM card and update IMEI? (Y/n): '
 read -r answer
@@ -93,7 +69,9 @@ sleep 2
 ## leak of the new SIM's IMSI with the old IMEI just in case the modem
 ## accidentally tried to log in to the network.
 if ! python3 /lib/blue-merle/imei_generate.py -r; then
-	echo "WARNING: interim IMEI set failed; the modem may still hold the old IMEI."
+	echo "ERROR: interim IMEI set failed; powering off before SIM swap." >&2
+	_safe_poweroff
+	exit 1
 fi
 
 
@@ -155,35 +133,37 @@ case $answer in
 	*) answer=1;;
 esac
 if [ "$answer" -eq 1 ]; then
-	python3 /lib/blue-merle/imei_generate.py -r
+	python3 /lib/blue-merle/imei_generate.py -r >/dev/null || {
+		echo "ERROR: final IMEI change failed; powering off." >&2
+		_safe_poweroff
+		exit 1
+	}
 else
-	python3 /lib/blue-merle/imei_generate.py -d
+	python3 /lib/blue-merle/imei_generate.py -d >/dev/null || {
+		echo "ERROR: deterministic IMEI change failed; powering off." >&2
+		_safe_poweroff
+		exit 1
+	}
 fi
 
 new_imei=$(READ_IMEI)
 
-if [ "$old_imei" = "$new_imei" ]; then
+if ! _is_valid_imei_shape "$new_imei"; then
+	echo "ERROR: IMEI readback is not a valid 15-digit value; powering off." >&2
+	_safe_poweroff
+	exit 1
+elif [ "$old_imei" = "$new_imei" ]; then
 	echo
 	echo "WARNING: Old IMEI equals new IMEI."
 	echo
+	_safe_poweroff
+	exit 1
 else
-	# Detect the modem-imei sysfs shim path dynamically (used to be hardcoded
-	# to /tmp/modem.1-1.2 which depends on USB enumeration).
-	modem_dir=$(ls -d /tmp/modem.*/ 2>/dev/null | head -n1)
-	if [ -z "$modem_dir" ]; then
-		modem_dir=/tmp/modem.1-1.2/
-		mkdir -p "$modem_dir"
-	fi
-	printf '%s' "$new_imei" > "${modem_dir%/}/modem-imei"
-	# Prevent IMEI leak via the eSIM LPA. /root/esim is expected to be a
-	# tmpfs mount (see /etc/init.d/blue-merle-esim-tmpfs) so the IMEI never
-	# touches flash.
-	if [ -d /root/esim ]; then
-		printf '%s' "$new_imei" > /root/esim/imei
-		# On tmpfs, shred is theatrical: overwriting pages doesn't defeat
-		# the kernel's page cache. Just remove the file.
-		[ -f /root/esim/log.txt ] && rm -f /root/esim/log.txt
-	fi
+	_write_runtime_imei "$new_imei" || {
+		echo "ERROR: volatile IMEI storage is not mounted; powering off." >&2
+		_safe_poweroff
+		exit 1
+	}
 fi
 
 echo "You should now reset the modem or shutdown the device."

@@ -11,8 +11,7 @@
 		},
 		"write": {
 			"file": {
-				"/usr/libexec/blue-merle random-imei": [ "exec" ],
-				"/usr/libexec/blue-merle shutdown-modem": [ "exec" ],
+				"/usr/libexec/blue-merle prepare-sim-swap": [ "exec" ],
 				"/usr/libexec/blue-merle shutdown": [ "exec" ],
 				"/usr/libexec/blue-merle set-tac-mode": [ "exec" ]
 			}

@@ -20,19 +20,7 @@ export BLUE_MERLE_TTY
 # Default is 'module' (86xxxxxx — Quectel/Sierra/Telit/u-blox). Users
 # switch to 'phone' (35xxxxxx — smartphone TACs) via LuCI or uci if
 # their operator blocks consumer SIMs on module TACs.
-_resolve_tac_list() {
-    local tac_mode
-    tac_mode=$(uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module)
-    case "$tac_mode" in
-        phone)
-            BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list-phone.txt
-            ;;
-        *)
-            BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list.txt
-            ;;
-    esac
-    export BLUE_MERLE_TAC_LIST
-}
+_resolve_tac_list() { _resolve_tac_selection; }
 
 show_message() {
     # There is mcu_send_message() in /lib/functions/gl_util.sh but we
@@ -49,6 +37,7 @@ logger -p notice -t blue-merle-libexec "libexec invoked: ${1:-<none>}"
 
 case "$1" in
     read-imei)
+        _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
         imei=$(READ_IMEI) || { echo "No IMEI found" >&2; exit 1; }
         # Mask the middle of the IMEI on the MCU screen so a shoulder-
         # surfer / photograph does not immediately capture the full
@@ -58,14 +47,15 @@ case "$1" in
         # support it. Use cut(1) instead, which is available in busybox.
         masked="$(printf '%s' "$imei" | cut -c1-6)******$(printf '%s' "$imei" | cut -c13-)"
         show_message "IMEI: $masked"
-        printf '%s' "$imei"
+        printf '%s' "$masked"
         ;;
 
     read-imsi)
+        _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
         imsi=$(READ_IMSI) || { echo "No IMSI found" >&2; exit 1; }
         masked="$(printf '%s' "$imsi" | cut -c1-5)******$(printf '%s' "$imsi" | cut -c12-)"
         show_message "IMSI: $masked"
-        printf '%s' "$imsi"
+        printf '%s' "$masked"
         ;;
 
     read-tac-mode)
@@ -89,16 +79,20 @@ case "$1" in
         esac
         ;;
 
-    random-imei)
+    prepare-sim-swap)
+        _sim_swap_pending && { echo "Hardware-toggle SIM swap is awaiting stage 2" >&2; exit 1; }
+        _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
         _resolve_tac_list
-        flock -n /tmp/blue-merle-imei-generate.lock \
-            timeout 15 python3 /lib/blue-merle/imei_generate.py --random \
-            || { echo "IMEI change failed" >&2; exit 1; }
-        READ_IMEI
-        ;;
-
-    shutdown-modem)
-        exec gl_modem AT AT+CFUN=4
+        tries=0
+        until gl_modem AT AT+CFUN=4 | grep -q OK; do
+            tries=$((tries+1))
+            [ "$tries" -ge 15 ] && { echo "CFUN=4 failed" >&2; exit 1; }
+            sleep 1
+        done
+        sleep 2
+        timeout 15 python3 /lib/blue-merle/imei_generate.py --random >/dev/null \
+            || { echo "Interim IMEI change failed" >&2; exit 1; }
+        READ_IMEI | sed -E 's/^(.{4}).*(.{4})$/\1******\2/'
         ;;
 
     shutdown)

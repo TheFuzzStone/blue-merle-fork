@@ -30,12 +30,110 @@ _resolve_modem_tty () {
         return 0
     fi
     for cand in /dev/ttyUSB3 /dev/ttyUSB2 /dev/ttyUSB1 /dev/ttyUSB0; do
-        if [ -c "$cand" ]; then
+        [ -c "$cand" ] || continue
+        if BLUE_MERLE_TTY_PROBE="$cand" python3 - <<'PY'
+import os
+import serial
+
+tty = os.environ["BLUE_MERLE_TTY_PROBE"]
+try:
+    with serial.Serial(tty, 9600, timeout=1, exclusive=True) as ser:
+        ser.reset_input_buffer()
+        ser.write(b"AT\r")
+        data = ser.read(64)
+        raise SystemExit(0 if b"OK" in data else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+        then
             printf '%s\n' "$cand"
             return 0
         fi
     done
     printf '/dev/ttyUSB3\n'
+    return 1
+}
+
+# Acquire the single process-wide modem operation lock on fd 9.
+# Every blue-merle entry point uses the same lock so gl_modem and
+# pyserial operations cannot interleave across CLI, toggle and LuCI.
+_acquire_modem_lock () {
+    exec 9>/tmp/blue-merle-modem.lock
+    flock -n 9
+}
+
+_sim_swap_pending () {
+    [ -f /tmp/blue-merle-stage1 ]
+}
+
+# Return success only when PATH is mounted as tmpfs. Exact field
+# parsing avoids substring matches and verifies the filesystem type.
+_is_tmpfs_mount () {
+    local path=$1
+    awk -v p="$path" '$2 == p && $3 == "tmpfs" { found=1 } END { exit !found }' /proc/mounts
+}
+
+# Resolve TAC selection for imei_generate.py.
+#
+# module (default): preserve the original/current device TAC captured
+# from the modem. No unverified manufacturer database is required.
+# phone: use a user-supplied TAC list and fail closed if it is absent.
+_resolve_tac_selection () {
+    local mode original_tac
+    mode=$(uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module)
+    unset BLUE_MERLE_TAC BLUE_MERLE_TAC_LIST
+    case "$mode" in
+        phone)
+            BLUE_MERLE_TAC_LIST=/lib/blue-merle/tac-list-phone.txt
+            export BLUE_MERLE_TAC_LIST
+            ;;
+        module|*)
+            original_tac=$(uci -q get blue-merle.main.original_tac 2>/dev/null || true)
+            case "$original_tac" in
+                [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+                    BLUE_MERLE_TAC=$original_tac
+                    export BLUE_MERLE_TAC
+                    ;;
+                *)
+                    # Python will read the current modem IMEI and preserve
+                    # its TAC if no captured original TAC is available.
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+# Validate a complete 15-digit IMEI readback.
+_is_valid_imei_shape () {
+    printf '%s\n' "$1" | grep -Eq '^[0-9]{15}$'
+}
+
+# Update integration files only when their backing storage is volatile.
+_write_runtime_imei () {
+    local imei=$1 modem_dir
+    _is_valid_imei_shape "$imei" || return 1
+    _is_tmpfs_mount /root/esim || return 1
+
+    modem_dir=$(ls -d /tmp/modem.*/ 2>/dev/null | head -n1)
+    if [ -z "$modem_dir" ]; then
+        modem_dir=/tmp/modem.1-1.2/
+        mkdir -p "$modem_dir" || return 1
+    fi
+    printf '%s' "$imei" > "${modem_dir%/}/modem-imei" || return 1
+
+    printf '%s' "$imei" > /root/esim/imei || return 1
+    rm -f /root/esim/log.txt 2>/dev/null || true
+}
+
+# Power off through the Mudi MCU. This is the only safe fail-closed
+# path after a modem state-machine error.
+_safe_poweroff () {
+    if [ -c /dev/ttyS0 ]; then
+        printf '{"msg":"Shutting down after error"}\n' > /dev/ttyS0
+        printf '{"poweroff":"1"}\n' > /dev/ttyS0
+        return 0
+    fi
+    logger -p err -t blue-merle "Cannot power off safely: /dev/ttyS0 missing"
     return 1
 }
 
@@ -109,9 +207,9 @@ PY
 
 # Randomize both AP BSSIDs (2.4 GHz + 5 GHz) using Apple OUIs.
 RESET_BSSIDS () {
-    uci set wireless.@wifi-iface[0].macaddr="$(APPLE_MAC_GEN)"
+    uci set wireless.@wifi-iface[0].macaddr="$(APPLE_MAC_GEN)" || return 1
     uci -q set wireless.@wifi-iface[1].macaddr="$(APPLE_MAC_GEN)" 2>/dev/null || true
-    uci commit wireless
+    uci commit wireless || return 1
     # you need to reset wifi for changes to apply, i.e. executing "wifi"
 }
 
@@ -123,17 +221,17 @@ RESET_BSSIDS () {
 # travel-router that connects to different upstream networks over cable.
 RANDOMIZE_MACADDR () {
     # WiFi-facing device (clients on the AP see this MAC).
-    uci set network.@device[1].macaddr="$(APPLE_MAC_GEN)"
+    uci set network.@device[1].macaddr="$(APPLE_MAC_GEN)" || return 1
 
     # MAC used when acting as an upstream-WiFi client (repeater mode).
-    uci set glconfig.general.macclone_addr="$(APPLE_MAC_GEN)"
+    uci set glconfig.general.macclone_addr="$(APPLE_MAC_GEN)" || return 1
 
     # Ethernet bridge (br-lan). Present in most Mudi firmwares; ignore
     # errors if the section name differs on other versions.
     uci -q set network.@device[0].macaddr="$(APPLE_MAC_GEN)" 2>/dev/null || true
 
-    uci commit network
-    uci commit glconfig
+    uci commit network || return 1
+    uci commit glconfig || return 1
     # You need to restart the network, i.e. /etc/init.d/network restart
 }
 
@@ -216,8 +314,8 @@ RANDOMIZE_HOSTNAME () {
             ;;
     esac
 
-    uci set system.@system[0].hostname="$model"
-    uci commit system
+    uci set system.@system[0].hostname="$model" || return 1
+    uci commit system || return 1
     # /etc/init.d/system reload picks it up.
 }
 
@@ -242,7 +340,7 @@ RANDOMIZE_SSID () {
     # bail out so we don't smash the existing SSID with garbage.
     case "$name" in
         ''|*[!A-Za-z]*)
-            return 0
+            return 1
             ;;
     esac
 
@@ -250,9 +348,9 @@ RANDOMIZE_SSID () {
 
     # Apply to both bands. `uci -q ... || true` protects the case where
     # wifi-iface[1] is disabled or missing (e.g. user runs 5 GHz only).
-    uci set wireless.@wifi-iface[0].ssid="$ssid"
+    uci set wireless.@wifi-iface[0].ssid="$ssid" || return 1
     uci -q set wireless.@wifi-iface[1].ssid="$ssid" 2>/dev/null || true
-    uci commit wireless
+    uci commit wireless || return 1
 }
 
 READ_ICCID() {

@@ -30,12 +30,10 @@ start() {
 
     mkdir -p "$CLIENT_DB_DIR"
 
-    # Preserve the current db (if any) into a temp buffer so that the
-    # tmpfs starts with the same content the daemon expects. On a fresh
-    # install /etc/oui-tertf may be empty — that's fine.
-    stash=$(mktemp -d)
+    # Do NOT import the historical flash database into RAM. Its content
+    # is exactly the client-MAC history this service exists to discard.
+    # gl_clients recreates client.db when needed.
     if [ -f "$CLIENT_DB" ]; then
-        cp -a "$CLIENT_DB" "$stash/client.db" 2>/dev/null || true
         # Just rm — shred is theatre on NAND (wear leveling + FTL
         # indirection mean overwrites land in new cells while the old
         # ones remain readable via chip-off), so it only creates a
@@ -43,12 +41,14 @@ start() {
         rm -f "$CLIENT_DB"
     fi
 
-    mount -t tmpfs -o mode=0755,size=1M tmpfs "$CLIENT_DB_DIR"
-
-    if [ -f "$stash/client.db" ]; then
-        cp -a "$stash/client.db" "$CLIENT_DB"
+    if ! mount -t tmpfs -o mode=0755,size=1M tmpfs "$CLIENT_DB_DIR"; then
+        logger -p err -t blue-merle "Failed to mount tmpfs on $CLIENT_DB_DIR"
+        return 1
     fi
-    rm -rf "$stash"
+    awk -v p="$CLIENT_DB_DIR" '$2 == p && $3 == "tmpfs" { found=1 } END { exit !found }' /proc/mounts || {
+        logger -p err -t blue-merle "$CLIENT_DB_DIR is not backed by tmpfs after mount"
+        return 1
+    }
 }
 
 stop() {
