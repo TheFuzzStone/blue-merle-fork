@@ -190,5 +190,9 @@ define Package/blue-merle/postrm
 	# the change would be lost on the next reboot.
 	uci set switch-button.@main[0].func='tor'
 	uci commit switch-button
+	# prerm stopped gl_clients before removing the tmpfs services. Bring
+	# the stock service back immediately so uninstall leaves a coherent
+	# running router even before the recommended reboot.
+	/etc/init.d/gl_clients start 2>/dev/null || true
 endef
 $(eval $(call BuildPackage,$(PKG_NAME)))

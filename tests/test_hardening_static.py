@@ -76,6 +76,29 @@ def test_build_does_not_mutate_source_tree():
     assert "find $(1)" in install
 
 
+def test_package_has_uninstall_lifecycle_cleanup():
+    makefile = _read("Makefile")
+    assert "define Package/blue-merle/prerm" in makefile
+    assert "/etc/init.d/volatile-client-macs stop" in makefile
+    assert "/etc/init.d/blue-merle-esim-tmpfs stop" in makefile
+    assert "/etc/init.d/gl_clients start" in makefile
+
+
+def test_reload_rotates_hostname_when_identity_is_not_stable():
+    src = _read("files/etc/init.d/blue-merle")
+    reload_block = src.split("reload()", 1)[1]
+    assert "RANDOMIZE_HOSTNAME || return 1" in reload_block
+
+
+def test_privacy_mounts_verify_tmpfs_type():
+    for path in (
+        "files/etc/init.d/blue-merle-esim-tmpfs",
+        "files/etc/init.d/volatile-client-macs",
+    ):
+        src = _read(path)
+        assert '$3 == "tmpfs"' in src
+
+
 def test_tac_lists_do_not_ship_unverified_values():
     for path in (
         "files/lib/blue-merle/tac-list.txt",
