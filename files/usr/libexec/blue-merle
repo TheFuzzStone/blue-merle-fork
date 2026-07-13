@@ -40,6 +40,20 @@ show_message() {
 logger -p notice -t blue-merle-libexec "libexec invoked: ${1:-<none>}"
 
 case "$1" in
+    read-identifiers)
+        _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
+        _resolve_tty_for_operation || { echo "No responsive modem TTY found" >&2; exit 1; }
+        imei=$(READ_IMEI) || { echo "No IMEI found" >&2; exit 1; }
+        imsi=$(READ_IMSI || true)
+        masked_imei="$(printf '%s' "$imei" | cut -c1-6)******$(printf '%s' "$imei" | cut -c13-)"
+        if [ -n "$imsi" ]; then
+            masked_imsi="$(printf '%s' "$imsi" | cut -c1-5)******$(printf '%s' "$imsi" | cut -c12-)"
+        else
+            masked_imsi=""
+        fi
+        printf '{"imei":"%s","imsi":"%s"}\n' "$masked_imei" "$masked_imsi"
+        ;;
+
     read-imei)
         _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
         _resolve_tty_for_operation || { echo "No responsive modem TTY found" >&2; exit 1; }

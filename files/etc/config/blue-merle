@@ -26,8 +26,9 @@ config main 'main'
 
 	# option tac_mode 'module'
 	#
-	#     module (default): preserve the TAC currently reported by the
-	#                       physical modem. No unverified TAC database.
+	#     module (default): preserve the baseline TAC captured during
+	#                       install (or current modem TAC if unavailable).
+	#                       No unverified TAC database.
 	#     phone          : use TACs explicitly supplied by the user in
 	#                       tac-list-phone.txt. Fails closed when empty.
 	#

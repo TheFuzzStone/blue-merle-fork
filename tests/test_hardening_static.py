@@ -53,6 +53,7 @@ def test_hotplug_respects_stable_identity():
 def test_luci_rpc_returns_masked_identifiers():
     src = _read("files/usr/libexec/blue-merle")
     assert "printf '%s' \"$masked\"" in src
+    assert "read-identifiers)" in src
     assert "prepare-sim-swap" in src
     assert "shutdown-modem)" not in src
     assert "random-imei)" not in src

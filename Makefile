@@ -137,9 +137,11 @@ define Package/blue-merle/postinst
 
 	uci set switch-button.@main[0].func='sim'
 	uci commit switch-button
-	# Capture the physical modem's current TAC once. Storing only the
-	# first 8 digits avoids retaining the full IMEI while allowing module
-	# mode to preserve a real, device-proven TAC without a guessed GSMA DB.
+	# Capture the modem's current TAC once as the baseline. Storing only
+	# the first 8 digits avoids retaining the full IMEI. On a factory/fresh
+	# install this is normally the physical module TAC; on an upgrade from
+	# another IMEI-changing package it is merely the current TAC. Users can
+	# override original_tac explicitly if they know an authoritative value.
 	if ! uci -q get blue-merle.main.original_tac >/dev/null 2>&1; then
 		original_imei=$$(gl_modem AT AT+GSN 2>/dev/null | grep -E '^[0-9]{15}$$' | head -n1)
 		case $$original_imei in

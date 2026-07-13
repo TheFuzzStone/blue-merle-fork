@@ -75,8 +75,9 @@ _is_tmpfs_mount () {
 
 # Resolve TAC selection for imei_generate.py.
 #
-# module (default): preserve the original/current device TAC captured
-# from the modem. No unverified manufacturer database is required.
+# module (default): preserve the baseline/current device TAC captured
+# during install or read from the modem. No unverified manufacturer
+# database is required.
 # phone: use a user-supplied TAC list and fail closed if it is absent.
 _resolve_tac_selection () {
     local mode original_tac

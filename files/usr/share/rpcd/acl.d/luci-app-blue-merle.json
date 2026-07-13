@@ -4,8 +4,7 @@
 		"read": {
 			"cgi-io": [ "exec" ],
 			"file": {
-				"/usr/libexec/blue-merle read-imei": [ "exec" ],
-				"/usr/libexec/blue-merle read-imsi": [ "exec" ],
+				"/usr/libexec/blue-merle read-identifiers": [ "exec" ],
 				"/usr/libexec/blue-merle read-tac-mode": [ "exec" ]
 			}
 		},

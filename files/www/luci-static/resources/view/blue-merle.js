@@ -35,8 +35,11 @@ function callBlueMerle(arg, extraArgs) {
 	});
 }
 
-function readIMEI() { return callBlueMerle('read-imei'); }
-function readIMSI() { return callBlueMerle('read-imsi'); }
+function readIdentifiers() {
+	return callBlueMerle('read-identifiers').then(function(data) {
+		return JSON.parse(data);
+	});
+}
 function readTacMode() { return callBlueMerle('read-tac-mode'); }
 
 function confirmModal(title, body, confirmLabel, onConfirm) {
@@ -258,23 +261,15 @@ return view.extend({
 			])
 		]);
 
-		readIMEI().then(function(imei) {
-			var el = document.getElementById(imeiInputID);
-			if (el) {
-				el.value = imei;
-			}
+		readIdentifiers().then(function(ids) {
+			var imeiEl = document.getElementById(imeiInputID);
+			var imsiEl = document.getElementById(imsiInputID);
+			if (imeiEl) imeiEl.value = ids.imei || _('unable to read');
+			if (imsiEl) imsiEl.value = ids.imsi || _('no IMSI (SIM missing?)');
 		}).catch(function() {
-			var el = document.getElementById(imeiInputID);
-			if (el) el.value = _('unable to read');
-		});
-
-		readIMSI().then(function(imsi) {
+			var imeiEl = document.getElementById(imeiInputID);
 			var el = document.getElementById(imsiInputID);
-			if (el) {
-				el.value = imsi;
-			}
-		}).catch(function() {
-			var el = document.getElementById(imsiInputID);
+			if (imeiEl) imeiEl.value = _('unable to read');
 			if (el) el.value = _('no IMSI (SIM missing?)');
 		});
 

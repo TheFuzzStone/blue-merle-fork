@@ -206,7 +206,7 @@ mode dropdown) or UCI:
 
 | Mode | File | Range | When to use |
 |---|---|---|---|
-| **module** (default) | Physical modem IMEI | Preserves the TAC currently reported by the modem. No external TAC database or manufacturer attribution is assumed. |
+| **module** (default) | Baseline TAC captured at install | Preserves the current modem TAC captured during install. On a fresh device this is normally the physical module TAC; on an upgrade it may be a previously changed TAC. Override `blue-merle.main.original_tac` only with an authoritative value. |
 | **phone** (advanced) | `tac-list-phone.txt` | User-supplied TACs only. The shipped file is intentionally empty; mode fails closed until you add verified allocations with an authoritative GSMA source. |
 
 Switch via UCI:
