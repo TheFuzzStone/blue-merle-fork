@@ -35,6 +35,12 @@ def test_all_modem_entry_points_use_shared_lock():
         assert "_acquire_modem_lock" in src, path
 
 
+def test_libexec_resolves_tty_only_after_operation_lock():
+    src = _read("files/usr/libexec/blue-merle")
+    block = src.split("prepare-sim-swap)", 1)[1].split(";;", 1)[0]
+    assert block.index("_acquire_modem_lock") < block.index("_resolve_tty_for_operation")
+
+
 def test_hotplug_respects_stable_identity():
     for path in (
         "files/etc/hotplug.d/iface/30-blue-merle-bssid-on-ifdown",

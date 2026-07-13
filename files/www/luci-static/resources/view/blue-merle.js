@@ -144,16 +144,13 @@ function handleSimSwap() {
 function handleTacModeChange(newMode, selectEl) {
 	var modeLabel = newMode === 'phone' ? _('Phone (smartphone TACs)') : _('Module (LTE-module TACs)');
 	var description = newMode === 'phone' ?
-		_('<b>Phone mode</b> uses TACs explicitly supplied by the user in tac-list-phone.txt. '
+		_('Phone mode uses TACs explicitly supplied by the user in tac-list-phone.txt. '
 		  + 'The project does not ship guessed TAC allocations. The mode cannot be enabled until '
 		  + 'the file contains at least one verified 8-digit TAC with authoritative provenance. '
-		  + '<br><br>'
-		  + '<b>Only enable this after adding TACs from a licensed/authoritative GSMA source.</b>') :
-		_('<b>Module mode</b> preserves the TAC currently reported by the physical modem. '
+		  + 'Only enable this after adding TACs from a licensed or otherwise authoritative GSMA source.') :
+		_('Module mode preserves the TAC currently reported by the physical modem. '
 		  + 'No manufacturer or device-class inference is made from TAC prefixes, and no '
-		  + 'external TAC database is required. '
-		  + '<br><br>'
-		  + '<b>This is the recommended default.</b>');
+		  + 'external TAC database is required. This is the recommended default.');
 
 	/* Save the previous value so we can revert the dropdown if the
 	 * UCI write fails. This is safer than assuming the opposite of

@@ -9,11 +9,11 @@
 
 . /lib/blue-merle/functions.sh
 
-# Resolve modem TTY once and export it so imei_generate.py (invoked
-# from the random-imei branch) uses the same port as the rest of the
-# package instead of its hard-coded default.
-BLUE_MERLE_TTY=$(_resolve_modem_tty)
-export BLUE_MERLE_TTY
+_resolve_tty_for_operation() {
+    BLUE_MERLE_TTY=$(_resolve_modem_tty) || return 1
+    [ -c "$BLUE_MERLE_TTY" ] || return 1
+    export BLUE_MERLE_TTY
+}
 
 # Resolve TAC mode from UCI and export the right TAC list path so
 # imei_generate.py picks up the correct pool (module vs phone TACs).
@@ -42,6 +42,7 @@ logger -p notice -t blue-merle-libexec "libexec invoked: ${1:-<none>}"
 case "$1" in
     read-imei)
         _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
+        _resolve_tty_for_operation || { echo "No responsive modem TTY found" >&2; exit 1; }
         imei=$(READ_IMEI) || { echo "No IMEI found" >&2; exit 1; }
         # Mask the middle of the IMEI on the MCU screen so a shoulder-
         # surfer / photograph does not immediately capture the full
@@ -56,6 +57,7 @@ case "$1" in
 
     read-imsi)
         _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
+        _resolve_tty_for_operation || { echo "No responsive modem TTY found" >&2; exit 1; }
         imsi=$(READ_IMSI) || { echo "No IMSI found" >&2; exit 1; }
         masked="$(printf '%s' "$imsi" | cut -c1-5)******$(printf '%s' "$imsi" | cut -c12-)"
         show_message "IMSI: $masked"
@@ -82,6 +84,7 @@ case "$1" in
     prepare-sim-swap)
         _sim_swap_pending && { echo "Hardware-toggle SIM swap is awaiting stage 2" >&2; exit 1; }
         _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
+        _resolve_tty_for_operation || { echo "No responsive modem TTY found" >&2; exit 1; }
         _resolve_tac_list
         tries=0
         until gl_modem AT AT+CFUN=4 | grep -q OK; do
