@@ -1,44 +1,63 @@
 #!/bin/sh
 #
-# When the upstream WiFi (repeater) or WAN interface comes up, rotate the
-# MAC that Mudi presents to the upstream network. Without this, two
-# consecutive connections to different hotspots would see the same MAC and
-# could correlate the sessions.
+# Rotate the upstream-facing MAC (repeater wwan / wired wan) when an
+# uplink interface goes DOWN, so the *next* association — whatever
+# network it is to — presents a fresh MAC to the upstream operator.
 #
-# GL.iNet's repeater interface is typically called "wwan" (netifd) and is
-# backed by wlan0-1 or similar. We also handle "wan" (Ethernet uplink).
-# We do NOT touch the AP-side MACs here — that would kick connected clients
-# offline on every uplink change.
+# Why ifdown and not ifup:
+#   * glconfig.general.macclone_addr is consumed when the uplink is
+#     created. Rotating at ifup therefore only staged the value for the
+#     NEXT association, and the write happened in a backgrounded
+#     subshell: a quick leave/rejoin could beat the uci commit, and a
+#     lock-contended or failed rotation was silently dropped — leaving
+#     the next network with the previous network's MAC.
+#   * Rotating at ifdown stages the fresh value while no association is
+#     active, synchronously, so the follow-up ifup can never read a
+#     stale committed value. One uci commit per leave/join cycle.
+#   * Same pattern as 30-blue-merle-bssid-on-ifdown.
 #
-# Note on timing: this runs on ifup. When the user selects a new repeater
-# network in LuCI, netifd tears down the old wwan and brings up a new one;
-# the new one has already been created with the previous macclone_addr, so
-# the new MAC we set here will only take effect on the *next* ifup (i.e.
-# reconnection to that same or a different hotspot). To get a fresh MAC
-# immediately, use `blue-merle-newmac --uplink` before selecting a
-# repeater network.
+# Trade-off: a transient drop of the *same* uplink also rotates the
+# MAC, so captive-portal networks may ask for re-authorisation. Set
+# blue-merle.main.stable_identity=1 if that matters more than
+# per-session unlinkability.
+#
+# AP-side MACs are deliberately untouched here — rotating them would
+# kick connected clients on every uplink flap.
 
-[ "$ACTION" = "ifup" ] || exit 0
+[ "$ACTION" = "ifdown" ] || exit 0
 
 [ "$(uci -q get blue-merle.main.stable_identity 2>/dev/null || echo 0)" = "1" ] && exit 0
 
-# Only react to upstream-facing interfaces.
+# Only react to upstream-facing logical interfaces.
+# GL.iNet's repeater interface is typically "wwan" (netifd); "wan" is
+# the wired uplink.
 case "$INTERFACE" in
     wwan|wan|wwan_*|wan_*) ;;
     *) exit 0 ;;
 esac
 
+# Serialize with any other blue-merle write to glconfig.
 LOCK=/tmp/blue-merle-uplink-mac.lock
 
-# Fire-and-forget in the background so netifd is not blocked.
+# Run synchronously (see 30-blue-merle-bssid-on-ifdown for the full
+# argument): the rotation must be committed before netifd processes the
+# matching ifup, or the off-by-one this hook exists to fix comes back.
+# netifd serialises per-interface hotplug scripts, so the sub-second
+# APPLE_MAC_GEN + uci commit blocks nothing outside the uplink path.
 (
     flock -n 9 || exit 0
     . /lib/blue-merle/functions.sh
-    # Use an Apple OUI so the MAC matches the iPhone/iPad hostname we
-    # advertise via DHCP. Falls back to UNICAST_MAC_GEN inside
-    # APPLE_MAC_GEN if /lib/blue-merle/apple-oui.txt is missing.
-    NEW_MAC=$(APPLE_MAC_GEN)
-    uci set glconfig.general.macclone_addr="$NEW_MAC"
-    uci commit glconfig
-    logger -p notice -t blue-merle "Rotated upstream macclone_addr after ifup of $INTERFACE"
-) 9>"$LOCK" &
+    # Apple OUI keeps the MAC consistent with the iPhone-style hostname
+    # advertised via DHCP. APPLE_MAC_GEN falls back to an RFC 7844
+    # locally-administered MAC if the OUI list is unreadable.
+    NEW_MAC=$(APPLE_MAC_GEN) || {
+        logger -p err -t blue-merle \
+            "MAC generator failed on ifdown of $INTERFACE; keeping previous uplink MAC"
+        exit 0
+    }
+    [ -n "$NEW_MAC" ] || exit 0
+    uci set glconfig.general.macclone_addr="$NEW_MAC" || exit 1
+    uci commit glconfig || exit 1
+    logger -p notice -t blue-merle \
+        "Rotated upstream macclone_addr after ifdown of $INTERFACE — next uplink will use it"
+) 9>"$LOCK"

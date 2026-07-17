@@ -50,6 +50,18 @@ def test_hotplug_respects_stable_identity():
         assert "stable_identity" in src, path
 
 
+def test_uplink_mac_rotates_on_ifdown_synchronously():
+    src = _read("files/etc/hotplug.d/iface/31-blue-merle-uplink-mac")
+    # Rotation at ifup only staged the MAC for the *next* association
+    # and raced it from a backgrounded subshell — a lock-contended or
+    # beaten commit left the next uplink with the previous MAC.
+    # ifdown staging (same pattern as the BSSID hook) closes the race.
+    assert '[ "$ACTION" = "ifdown" ]' in src
+    assert '[ "$ACTION" = "ifup" ]' not in src
+    # The rotation must not be fire-and-forget backgrounded.
+    assert ') 9>"$LOCK" &' not in src
+
+
 def test_luci_rpc_returns_masked_identifiers():
     src = _read("files/usr/libexec/blue-merle")
     assert "printf '%s' \"$masked\"" in src
