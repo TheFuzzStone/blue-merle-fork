@@ -15,11 +15,11 @@ _resolve_tty_for_operation() {
     export BLUE_MERLE_TTY
 }
 
-# Resolve TAC mode from UCI and export the right TAC list path so
-# imei_generate.py picks up the correct pool (module vs phone TACs).
-# Default is 'module' (86xxxxxx — Quectel/Sierra/Telit/u-blox). Users
-# switch to 'phone' (35xxxxxx — smartphone TACs) via LuCI or uci if
-# their operator blocks consumer SIMs on module TACs.
+# Resolve TAC mode from UCI and export the matching selection so
+# imei_generate.py picks up the right source. Default is 'module'
+# (preserve the baseline modem TAC; no external database). Users can
+# switch to 'phone' (their own verified TAC list) via LuCI or uci.
+# Policy: never infer device class from TAC prefixes.
 _resolve_tac_list() { _resolve_tac_selection; }
 
 _tac_file_has_valid_entry() {
@@ -100,16 +100,46 @@ case "$1" in
         _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
         _resolve_tty_for_operation || { echo "No responsive modem TTY found" >&2; exit 1; }
         _resolve_tac_list
+        # Capture the current IMEI for the post-write comparison. An empty
+        # value is tolerated (stage2 allows it too): the readback checks
+        # below are the real gate.
+        old_imei=$(READ_IMEI || true)
         tries=0
         until gl_modem AT AT+CFUN=4 | grep -q OK; do
             tries=$((tries+1))
-            [ "$tries" -ge 15 ] && { echo "CFUN=4 failed" >&2; exit 1; }
+            [ "$tries" -ge 15 ] && { echo "CFUN=4 failed; modem state unchanged, retry or reboot" >&2; exit 1; }
             sleep 1
         done
         sleep 2
-        timeout 15 python3 /lib/blue-merle/imei_generate.py --random >/dev/null \
-            || { echo "Interim IMEI change failed" >&2; exit 1; }
-        READ_IMEI | sed -E 's/^(.{4}).*(.{4})$/\1******\2/'
+        if ! timeout 15 python3 /lib/blue-merle/imei_generate.py --random >/dev/null; then
+            echo "IMEI write failed; do NOT swap the SIM, retry or reboot to restore service" >&2
+            exit 1
+        fi
+        # This flow has no stage 2: the value written above becomes the
+        # on-air IMEI after reboot, so the same fail-closed invariants as
+        # blue-merle-switch-stage2 apply before success may be reported.
+        # Anything else risks the user swapping the SIM into a
+        # half-applied modem state (old IMEI associated with new IMSI).
+        new_imei=$(READ_IMEI || true)
+        if ! _is_valid_imei_shape "$new_imei"; then
+            echo "IMEI readback invalid; powering off" >&2
+            _safe_poweroff
+            exit 1
+        elif [ -n "$old_imei" ] && [ "$old_imei" = "$new_imei" ]; then
+            echo "IMEI unchanged after write; powering off" >&2
+            _safe_poweroff
+            exit 1
+        fi
+        if ! _write_runtime_imei "$new_imei"; then
+            echo "Volatile IMEI storage unavailable; powering off" >&2
+            _safe_poweroff
+            exit 1
+        fi
+        # Same masked form as read-imei (first 6 + last 3 digits), and
+        # only after every check above passed — never mask a failed read
+        # behind a pipeline (exit status would be sed's, always 0).
+        masked="$(printf '%s' "$new_imei" | cut -c1-6)******$(printf '%s' "$new_imei" | cut -c13-)"
+        printf '%s' "$masked"
         ;;
 
     shutdown)

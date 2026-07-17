@@ -237,8 +237,8 @@ return view.extend({
 						}
 					}
 				}, [
-					E('option', { 'value': 'module' }, [ _('Module (86xx — recommended)') ]),
-					E('option', { 'value': 'phone' }, [ _('Phone (35xx — fallback)') ])
+				E('option', { 'value': 'module' }, [ _('Module (preserve modem TAC — recommended)') ]),
+				E('option', { 'value': 'phone' }, [ _('Phone (user-supplied TAC list)') ])
 				]),
 				E('span', {}, [
 					_('  Switch to Phone if your SIM does not work in Module mode.')

@@ -106,6 +106,38 @@ def test_privacy_mounts_verify_tmpfs_type():
         assert '$3 == "tmpfs"' in src
 
 
+def test_libexec_sim_swap_applies_stage2_invariants():
+    src = _read("files/usr/libexec/blue-merle")
+    block = src.split("prepare-sim-swap)", 1)[1].split(";;", 1)[0]
+    # The LuCI flow has no stage 2: the value it writes becomes the
+    # on-air IMEI after reboot, so the stage2 fail-closed contract
+    # applies — shape-validated readback, volatile-store persistence,
+    # and poweroff on any uncertain state.
+    assert '_is_valid_imei_shape "$new_imei"' in block
+    assert '_write_runtime_imei "$new_imei"' in block
+    assert "_safe_poweroff" in block
+    # Regression: the old pipeline masked READ_IMEI's exit status behind
+    # sed (always 0), so a failed readback reported a masked "success".
+    assert "READ_IMEI | sed" not in block
+    # Mask form matches read-imei (cut-based), not the old sed 4+4 form.
+    assert "cut -c1-6" in block
+    # Persistence must happen before the masked success output.
+    assert block.index("_write_runtime_imei") < block.index('printf \'%s\' "$masked"')
+
+
+def test_tac_mode_ui_makes_no_device_class_claims():
+    # Policy: TAC prefixes do not encode manufacturer or device class.
+    # The LuCI labels and libexec comments must not teach users the
+    # 86xx=module / 35xx=phone heuristic the project itself rejects.
+    for path in (
+        "files/usr/libexec/blue-merle",
+        "files/www/luci-static/resources/view/blue-merle.js",
+    ):
+        src = _read(path)
+        assert "86xx" not in src, path
+        assert "35xx" not in src, path
+
+
 def test_tac_lists_do_not_ship_unverified_values():
     for path in (
         "files/lib/blue-merle/tac-list.txt",

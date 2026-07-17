@@ -82,4 +82,10 @@ python3 tests/run_all.py   # all must pass
 - `uci commit` → must match the section (`glconfig`, not `network`).
 - `wifi-iface[1]` → may be disabled. Always `uci -q … || true`.
 - `read` in stage1/2 → no TTY. Use tmpfs files.
+- `READ_IMEI | sed …` → pipeline status is sed's (always 0). Validate
+  the read first (`_is_valid_imei_shape`), mask only on success.
+- LuCI `prepare-sim-swap` has no stage 2 — it must apply the same
+  fail-closed invariants as stage2 (`_write_runtime_imei`, poweroff).
+- TAC UI/comments must not claim `86xx`=module / `35xx`=phone; prefixes
+  don't encode device class.
 - `__pycache__` → `rm -rf` before `git add`; Makefile scrubs staged dir.
