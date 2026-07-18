@@ -13,7 +13,9 @@
 # eSIM stack starts fairly late; priority 8 puts us ahead of network (20)
 # and the LPA daemon.
 
+# shellcheck disable=SC2034 # START/STOP are consumed by /etc/rc.common
 START=8
+# shellcheck disable=SC2034
 STOP=98
 
 ESIM_DIR=/root/esim

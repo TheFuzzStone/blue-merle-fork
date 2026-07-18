@@ -23,6 +23,18 @@ jobs:
                -type f -print0 | xargs -0 -n1 sh -n
           sh -n files/lib/blue-merle/functions.sh
           sh -n tools/blue-merle-diag.sh
+      - name: Install shellcheck
+        run: |
+          curl -sSL -o /tmp/sc.tar.xz \
+            https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
+          tar -C /tmp -xf /tmp/sc.tar.xz
+          sudo cp /tmp/shellcheck-v0.10.0/shellcheck /usr/local/bin/
+      - name: Shellcheck (POSIX sh dialect, warnings and above)
+        run: |
+          shellcheck -s sh -S warning \
+            $(find files/usr/bin files/usr/libexec files/etc/init.d \
+                 files/etc/hotplug.d files/etc/gl-switch.d -type f) \
+            files/lib/blue-merle/functions.sh tools/blue-merle-diag.sh
       - name: Run unit tests
         run: python3 tests/run_all.py
 
@@ -66,6 +78,23 @@ jobs:
           cd "sdk/${SDK_FILENAME%.tar.xz}"
           make -j$(nproc) V=s package/${{ env.owrt-package }}/compile
           make -j1 V=s package/index
+      - name: Audit package contents
+        run: |
+          cd "sdk/${SDK_FILENAME%.tar.xz}/bin/packages/mips_24kc/base"
+          ipk=$(ls "${{ env.owrt-package }}"_*.ipk | head -n1)
+          rm -rf /tmp/ipk-audit && mkdir -p /tmp/ipk-audit && cd /tmp/ipk-audit
+          ar x "$OLDPWD/$ipk"
+          tar tzf data.tar.gz > data.list
+          tar tzf control.tar.gz > control.list
+          # Purged/known-dead files must never ship, and no Python bytecode.
+          ! grep -E '__pycache__|\.pyc$|iphone-models|luhn\.lua|rerandomize' data.list
+          # Core payload and all four install scriptlets must be present.
+          grep -q 'lib/blue-merle/functions.sh' data.list
+          grep -q 'usr/libexec/blue-merle' data.list
+          grep -q 'lib/blue-merle/us-first-names.txt' data.list
+          for f in preinst postinst prerm postrm; do
+            grep -qE "(^\./)?$f\$" control.list
+          done
       - name: Generate artifact name
         id: generate-name
         run: echo "artifact-name=${{ github.event.repository.name }}-${{ github.ref_name }}-${{ github.sha }}" >> $GITHUB_OUTPUT

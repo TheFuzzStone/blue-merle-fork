@@ -30,13 +30,17 @@ if [ "$action" = "on" ]; then
     mcu_send_message "Blue Merle ${action}"
     echo "on" > /tmp/sim_change_switch
     logger -p notice -t blue-merle-toggle "Running Stage 1"
-    flock -n /tmp/blue-merle-switch.lock timeout 90 /usr/bin/blue-merle-switch-stage1 \
+    # The timeout must exceed the stage's own worst-case budget
+    # (CFUN retries + EGMR + readbacks + MCU sleeps ≈ 100 s), or a
+    # SIGTERM can land between the EGMR write and the runtime-store
+    # update / safe poweroff, leaving a half-finished swap.
+    flock -n /tmp/blue-merle-switch.lock timeout 150 /usr/bin/blue-merle-switch-stage1 \
         || logger -p notice -t blue-merle-toggle "Stage 1 lock busy or failed"
 
 elif [ "$action" = "off" ]; then
     # Only run stage2 if stage1 finished its part.
     if [ -f /tmp/blue-merle-stage1 ]; then
-        flock -n /tmp/blue-merle-switch.lock timeout 90 /usr/bin/blue-merle-switch-stage2 \
+        flock -n /tmp/blue-merle-switch.lock timeout 150 /usr/bin/blue-merle-switch-stage2 \
             || logger -p notice -t blue-merle-toggle "Stage 2 lock busy or failed"
     else
         logger -p notice -t blue-merle-toggle "No Stage 1; Toggling Off"

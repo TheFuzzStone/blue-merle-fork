@@ -1,5 +1,6 @@
 #!/bin/sh /etc/rc.common
 
+# shellcheck disable=SC3043 # 'local' is supported by busybox ash on target.
 . /lib/blue-merle/functions.sh
 
 # We intend to be started before the first network-related service is started.
@@ -7,7 +8,9 @@
 # the order of the services to be started (or stopped). The lower the number,
 # the earlier the service is started.
 # We observe "repeater" having the value 15. "network" 20. We certainly want to ahead of those.
+# shellcheck disable=SC2034 # START/STOP are consumed by /etc/rc.common
 START=10
+# shellcheck disable=SC2034
 STOP=99
 
 # Report the SSID that this boot picked on the MCU screen so the user

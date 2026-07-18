@@ -54,30 +54,6 @@ case "$1" in
         printf '{"imei":"%s","imsi":"%s"}\n' "$masked_imei" "$masked_imsi"
         ;;
 
-    read-imei)
-        _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
-        _resolve_tty_for_operation || { echo "No responsive modem TTY found" >&2; exit 1; }
-        imei=$(READ_IMEI) || { echo "No IMEI found" >&2; exit 1; }
-        # Mask the middle of the IMEI on the MCU screen so a shoulder-
-        # surfer / photograph does not immediately capture the full
-        # identifier. The full value is still returned on stdout to LuCI.
-        #
-        # NOTE: ${var:offset:length} is a bashism — busybox ash does not
-        # support it. Use cut(1) instead, which is available in busybox.
-        masked="$(printf '%s' "$imei" | cut -c1-6)******$(printf '%s' "$imei" | cut -c13-)"
-        show_message "IMEI: $masked"
-        printf '%s' "$masked"
-        ;;
-
-    read-imsi)
-        _acquire_modem_lock || { echo "Another modem operation is active" >&2; exit 99; }
-        _resolve_tty_for_operation || { echo "No responsive modem TTY found" >&2; exit 1; }
-        imsi=$(READ_IMSI) || { echo "No IMSI found" >&2; exit 1; }
-        masked="$(printf '%s' "$imsi" | cut -c1-5)******$(printf '%s' "$imsi" | cut -c12-)"
-        show_message "IMSI: $masked"
-        printf '%s' "$masked"
-        ;;
-
     read-tac-mode)
         # Return the current TAC mode for the LuCI dropdown.
         uci -q get blue-merle.main.tac_mode 2>/dev/null || echo module
@@ -135,9 +111,9 @@ case "$1" in
             _safe_poweroff
             exit 1
         fi
-        # Same masked form as read-imei (first 6 + last 3 digits), and
-        # only after every check above passed — never mask a failed read
-        # behind a pipeline (exit status would be sed's, always 0).
+        # Same masked form as read-identifiers (first 6 + last 3
+        # digits), and only after every check above passed — never mask
+        # a failed read behind a pipeline (exit status would be sed's).
         masked="$(printf '%s' "$new_imei" | cut -c1-6)******$(printf '%s' "$new_imei" | cut -c13-)"
         printf '%s' "$masked"
         ;;

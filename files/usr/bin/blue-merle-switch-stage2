@@ -4,7 +4,7 @@
 . /lib/functions/gl_util.sh
 
 _acquire_modem_lock || {
-	mcu_send_message "Another modem operation is active."
+	mcu_send_message "Another modem   operation is    active."
 	exit 99
 }
 
@@ -80,16 +80,16 @@ new_imsi=$(READ_IMSI)
 # If they are equal AND non-empty, the user probably forgot to swap the SIM.
 # We also warn on an empty new_imsi (SIM not detected).
 if [ -z "$new_imsi" ]; then
-	mcu_send_message "WARNING:        No SIM detected. Insert a SIM and toggle again."
+	mcu_send_message "WARNING:        No SIM detected.  Insert a SIM and  toggle again."
 	sleep 3
 elif [ -n "$old_imsi" ] && [ "$old_imsi" = "$new_imsi" ]; then
-	mcu_send_message "WARNING:        Old IMSI equals new IMSI. Did you swap the SIM?"
+	mcu_send_message "WARNING:        Old IMSI equals new IMSI.       Did you swap the    SIM?"
 	sleep 3
 fi
 
 mcu_send_message "Setting random  IMEI"
 if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r >/dev/null; then
-	mcu_send_message "ERROR:          IMEI change failed. Reboot and retry."
+	mcu_send_message "ERROR:          IMEI change failed.       Reboot and retry."
 	sleep 5
 	_safe_poweroff
 	exit 1
@@ -101,7 +101,7 @@ new_imei=$(READ_IMEI)
 sleep 1
 
 if ! _is_valid_imei_shape "$new_imei"; then
-	mcu_send_message "ERROR:          IMEI readback invalid. Powering off."
+	mcu_send_message "ERROR:          IMEI readback invalid.      Powering off."
 	sleep 3
 	_safe_poweroff
 	exit 1
@@ -112,7 +112,7 @@ elif [ -n "$old_imei" ] && [ "$old_imei" = "$new_imei" ]; then
 	exit 1
 else
 	if ! _write_runtime_imei "$new_imei"; then
-		mcu_send_message "ERROR:          volatile IMEI storage unavailable."
+		mcu_send_message "ERROR:          volatile IMEI     storage unavailable."
 		sleep 3
 		_safe_poweroff
 		exit 1

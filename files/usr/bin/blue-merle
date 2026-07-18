@@ -205,7 +205,9 @@ else
 
 	time_start=$(date +%s)
 	timeout_sec=60
-	until imsi=$(gl_modem AT AT+CIMI | grep -w -E "[0-9]{6,15}")
+	# grep -q prints nothing: the IMSI never touches the terminal or a
+	# shell variable here. The pipeline's exit status is the gate.
+	until gl_modem AT AT+CIMI | grep -q -w -E "[0-9]{6,15}"
 	do
 		time_now=$(date +%s)
 		elapsed=$((time_now-time_start))

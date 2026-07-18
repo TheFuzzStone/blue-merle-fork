@@ -14,7 +14,9 @@
 #     (that is why the package's preinst also stops gl_clients before we
 #     take over on first install).
 
+# shellcheck disable=SC2034 # START/STOP are consumed by /etc/rc.common
 START=9
+# shellcheck disable=SC2034
 STOP=99
 
 CLIENT_DB_DIR=/etc/oui-tertf

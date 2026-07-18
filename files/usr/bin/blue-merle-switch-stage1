@@ -4,7 +4,7 @@
 . /lib/functions/gl_util.sh
 
 _acquire_modem_lock || {
-	mcu_send_message "Another modem operation is active."
+	mcu_send_message "Another modem   operation is    active."
 	exit 99
 }
 
@@ -53,7 +53,7 @@ sleep 3
 #mcu_send_message "Continuing ..."
 #sleep 1
 
-mcu_send_message "Disabling the ME from transmitting and receiving RF signals."
+mcu_send_message "Disabling the   ME radio..."
 sleep 3
 
 old_imei=$(READ_IMEI)
@@ -80,7 +80,7 @@ while [ "$answer" -eq 1 ]; do
 	else
 		cfun4_tries=$((cfun4_tries+1))
 		if [ "$cfun4_tries" -ge 15 ]; then
-			mcu_send_message "Disabling failed after 15 tries. Aborting."
+			mcu_send_message "Disabling failed        after 15 tries. Aborting."
 			exit 1
 		fi
 		mcu_send_message "Disabling failed. Trying again."
@@ -103,7 +103,7 @@ sleep 2
 ## new SIM's IMSI under the old IMEI in case the modem
 ## still talks to the network
 if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r >/dev/null; then
-	mcu_send_message "ERROR:          interim IMEI failed. Powering off."
+	mcu_send_message "ERROR:          interim IMEI failed.      Powering off."
 	sleep 3
 	_safe_poweroff
 	exit 1
@@ -113,10 +113,10 @@ fi
 # Adjust the prompt to match the actual state: if there was no SIM in the
 # first place, telling the user to "replace" one is confusing.
 if [ -z "$old_imsi" ]; then
-	mcu_send_message "No SIM detected. Insert one, then pull the switch."
+	mcu_send_message "No SIM detected.        Insert one, then    pull the switch."
 else
-	mcu_send_message "Replace the SIM card. Then pull the switch."
+	mcu_send_message "Replace the SIM card.   Then pull the     switch."
 fi
 
-echo done > /tmp/blue-merle-stage1
+echo "done" > /tmp/blue-merle-stage1
 logger -p notice -t blue-merle-toggle "Finished with Stage 1"

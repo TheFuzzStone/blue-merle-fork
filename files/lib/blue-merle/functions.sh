@@ -1,5 +1,8 @@
 #!/usr/bin/env ash
 
+# shellcheck disable=SC3043 # 'local' is not POSIX, but the target shell
+# (busybox ash) supports it; this file never runs under dash.
+
 # This script provides helper functions for blue-merle
 
 

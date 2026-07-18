@@ -80,8 +80,8 @@ define Package/blue-merle/preinst
 			echo "Re-run with BLUE_MERLE_FORCE=1 to override."
 			exit 1
 		fi
-		echo -n "Would you like to continue at your own risk? (y/N): "
-		read answer
+	printf 'Would you like to continue at your own risk? (y/N): '
+	read answer
 		case $$answer in
 			y*|Y*) return 0 ;;
 			*)     exit 1 ;;
@@ -173,7 +173,7 @@ define Package/blue-merle/postinst
 
 	# Announce completion on the MCU screen if we have one.
 	if [ -c /dev/ttyS0 ]; then
-		printf '{"msg":"Successfully installed Blue Merle"}\n' > /dev/ttyS0
+		printf '{"msg":"Successfully      installed Blue  Merle"}\n' > /dev/ttyS0
 	fi
 endef
 

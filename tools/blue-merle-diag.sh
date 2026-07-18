@@ -298,6 +298,7 @@ printf '  blue-merle-related entries in current ring buffer: %s\n' "$count"
 section "10. Init script setup"
 # ---------------------------------------------------------------
 echo "/etc/rc.d/ entries for blue-merle:"
+# shellcheck disable=SC2010 # ls|grep is fine in a read-only diagnostic
 ls -la /etc/rc.d/ 2>/dev/null | grep -i blue-merle | sed 's/^/  /' || echo "  (none)"
 
 echo ""
