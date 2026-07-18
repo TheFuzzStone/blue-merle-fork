@@ -79,6 +79,29 @@ def test_luci_tac_acl_uses_exact_subcommands_without_arguments():
     assert 'set-tac-mode)' not in libexec
 
 
+def test_luci_acl_matches_libexec_surface():
+    """The RPC surface is strictly enumerated: every libexec subcommand
+    must be reachable through the ACL, and the ACL must not permit
+    anything libexec does not implement. Dead subcommands that still
+    open the modem / write to ttyS0 must not linger unreachable."""
+    import json
+    import re
+
+    acl = json.loads(_read("files/usr/share/rpcd/acl.d/luci-app-blue-merle.json"))
+    app = acl["luci-app-blue-merle"]
+    permitted = set()
+    for scope in ("read", "write"):
+        for cmd in app.get(scope, {}).get("file", {}):
+            assert cmd.startswith("/usr/libexec/blue-merle "), cmd
+            permitted.add(cmd.split(" ", 1)[1])
+
+    libexec = _read("files/usr/libexec/blue-merle")
+    labels = set()
+    for m in re.finditer(r"^    ([a-z0-9|_-]+)\)$", libexec, re.M):
+        labels.update(m.group(1).split("|"))
+    assert labels == permitted, f"surface/ACL drift: {labels ^ permitted}"
+
+
 def test_network_tools_check_failures_before_reporting_success():
     newssid = _read("files/usr/bin/blue-merle-newssid")
     newmac = _read("files/usr/bin/blue-merle-newmac")
@@ -153,7 +176,7 @@ def test_libexec_sim_swap_applies_stage2_invariants():
     # Regression: the old pipeline masked READ_IMEI's exit status behind
     # sed (always 0), so a failed readback reported a masked "success".
     assert "READ_IMEI | sed" not in block
-    # Mask form matches read-imei (cut-based), not the old sed 4+4 form.
+    # Mask form matches read-identifiers (cut-based), not the sed form.
     assert "cut -c1-6" in block
     # Persistence must happen before the masked success output.
     assert block.index("_write_runtime_imei") < block.index('printf \'%s\' "$masked"')
@@ -176,8 +199,13 @@ def test_ci_runs_unit_tests_and_shell_syntax_checks():
     ci = _read(".github/workflows/ci.yml")
     assert "python3 tests/run_all.py" in ci
     assert "sh -n" in ci
+    assert "shellcheck -s sh" in ci
     # The package build must not publish artifacts for failing code.
     assert "needs: test" in ci
+    # The built ipk is audited for purged/dead files and bytecode.
+    assert "Audit package contents" in ci
+    assert "__pycache__" in ci
+    assert "iphone-models" in ci
 
 
 def test_diag_script_is_versioned_and_masks_identifiers():
@@ -201,6 +229,95 @@ def test_write_runtime_imei_updates_every_modem_dir():
     assert "head -n1" not in block
     # The volatile store remains the fail-closed gate.
     assert "_is_tmpfs_mount /root/esim" in block
+
+
+def test_makefile_scriptlets_are_valid_busybox_sh():
+    """preinst/postinst/prerm/postrm run on the real device at install
+    time but are invisible to the CI shell syntax checks (they live in
+    make defines). Extract them, undo the make-level $$ escaping, sh -n
+    each one, and enforce the AGENTS.md busybox bans."""
+    import os
+    import re
+    import subprocess
+    import tempfile
+
+    banned = [
+        (r"echo -n", "echo -n (use printf)"),
+        (r"\[\[ ", "[[ ]] (use [ ])"),
+        (r"\$\{[A-Za-z_][A-Za-z0-9_]*:(?![-=?!+])", "${var:offset} (use cut)"),
+        (r"\bmountpoint\b", "mountpoint (use awk on /proc/mounts)"),
+        (r"\b(hexdump|od)\b", "od/hexdump (use /proc/sys/kernel/random/uuid)"),
+        (r"flock -E", "flock -E (use fd-based flock -n 9)"),
+    ]
+    mk = _read("Makefile")
+    found = 0
+    for name in ("preinst", "postinst", "prerm", "postrm"):
+        marker = f"define Package/blue-merle/{name}"
+        assert marker in mk, f"{name} missing from Makefile"
+        body = mk.split(marker, 1)[1].split("endef", 1)[0]
+        script = body.replace("$$", "$")
+        found += 1
+        with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as tf:
+            tf.write(script)
+        res = subprocess.run(["sh", "-n", tf.name], capture_output=True, text=True)
+        os.unlink(tf.name)
+        assert res.returncode == 0, f"{name}: sh -n failed: {res.stderr}"
+        for rx, why in banned:
+            assert not re.search(rx, script), f"{name}: banned construct {why}"
+    assert found == 4
+
+
+def test_sim_sh_timeout_covers_stage_budget():
+    # The stages' own worst-case budget (bounded CFUN retries + EGMR
+    # timeout + readbacks + MCU sleeps) is ~100-120 s. The wrapper
+    # timeout must clear it comfortably: a SIGTERM landing between the
+    # EGMR write and the runtime-store update / safe poweroff would
+    # leave a half-finished swap with a stale volatile store.
+    import re
+
+    src = _read("files/etc/gl-switch.d/sim.sh")
+    timeouts = [int(t) for t in re.findall(r"timeout (\d+) ", src)]
+    assert timeouts, "no timeout wrappers found in sim.sh"
+    assert all(t >= 150 for t in timeouts), timeouts
+
+
+def test_mcu_messages_fit_display_segments():
+    """The 16x2 MCU display handles long text via whitespace-separated
+    segments (the convention in the surviving upstream messages, e.g.
+    "Please wait     >1min between   two SIM swaps."). A single segment
+    longer than the 32-char screen risks silent truncation, so every
+    message is pre-paginated: no segment may exceed 32 chars. Exact
+    MCU behaviour is unverified on hardware — keeping segments within
+    one screen is the safe choice under every interpretation."""
+    import re
+
+    pat = re.compile(
+        r'mcu_send_message "([^"]*)"'
+        r"|show_message \"([^\"]*)\""
+        r"|'\{ ?\"msg\": ?\"([^\"]*)\" ?\}'"
+        r'|\{"msg":"([^"]*)"\}'
+    )
+    for path in (
+        "files/usr/bin/blue-merle-switch-stage1",
+        "files/usr/bin/blue-merle-switch-stage2",
+        "files/usr/bin/blue-merle",
+        "files/etc/gl-switch.d/sim.sh",
+        "files/etc/init.d/blue-merle",
+        "files/usr/libexec/blue-merle",
+        "files/lib/blue-merle/functions.sh",
+        "Makefile",
+    ):
+        for line in _read(path).splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            for m in pat.finditer(line):
+                msg = next(g for g in m.groups() if g is not None)
+                # Variables get an 8-char placeholder; %s the 32-char max.
+                msg = re.sub(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?", "XXXXXXXX", msg)
+                msg = msg.replace("%s", "X" * 32)
+                segs = [s for s in re.split(r" {2,}", msg) if s]
+                worst = max((len(s) for s in segs), default=0)
+                assert worst <= 32, f"{path}: segment too long in {msg!r}"
 
 
 def test_tac_lists_do_not_ship_unverified_values():

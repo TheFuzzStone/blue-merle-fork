@@ -70,7 +70,7 @@ Reconnect with the **same password** — it never rotates.
 
 ### Tests
 
-63 unit tests including 13 static privacy-invariant regressions.
+75 unit tests including 24 static privacy-invariant regressions.
 
 ```sh
 python3 tests/run_all.py
