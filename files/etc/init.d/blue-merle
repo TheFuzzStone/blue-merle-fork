@@ -49,8 +49,7 @@ start() {
 	else
 		RESET_BSSIDS || return 1
 		RANDOMIZE_MACADDR || return 1
-		RANDOMIZE_HOSTNAME || return 1
-		RANDOMIZE_SSID || return 1
+		RANDOMIZE_IDENTITY || return 1
 	fi
 	_announce_ssid_on_mcu
 }
@@ -65,7 +64,6 @@ reload() {
 	else
 		RESET_BSSIDS || return 1
 		RANDOMIZE_MACADDR || return 1
-		RANDOMIZE_HOSTNAME || return 1
-		RANDOMIZE_SSID || return 1
+		RANDOMIZE_IDENTITY || return 1
 	fi
 }

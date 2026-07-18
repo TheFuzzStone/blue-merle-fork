@@ -1,12 +1,14 @@
-"""Tests for the iPhone-model pool used by RANDOMIZE_HOSTNAME.
+"""Tests for the paired SSID/hostname identity (RANDOMIZE_IDENTITY).
 
-We don't invoke RANDOMIZE_HOSTNAME here — it does `uci set/commit`
-which would mutate the dev host's UCI. Instead we exercise the pool
-file directly and verify the shell picker returns entries from it.
+The hostname is composed from the same us-first-names pool as the SSID
+("<Name>s-iPhone", mirroring how iOS sanitises "Emma's iPhone"), so the
+two identifiers always corroborate. The old iphone-models.txt pool was
+removed: real iPhones send the *device name* as their DHCP hostname,
+never a model string like "iPhone-15-Pro".
 
-iPad models were removed from this codebase when SSID rotation started
-using a name-based Personal-Hotspot pattern (SSID = "<Name>'s iPhone"),
-so the hostname now consistently mirrors an iPhone identity as well.
+We don't invoke RANDOMIZE_* here — they do `uci set/commit` which would
+mutate the dev host's UCI. Instead we exercise the composition helpers
+and the name picker through /bin/sh.
 """
 
 from __future__ import annotations
@@ -16,7 +18,8 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-IPHONE = ROOT / "files" / "lib" / "blue-merle" / "iphone-models.txt"
+NAMES = ROOT / "files" / "lib" / "blue-merle" / "us-first-names.txt"
+FUNCTIONS_SH = ROOT / "files" / "lib" / "blue-merle" / "functions.sh"
 
 
 def _load(p: Path) -> list[str]:
@@ -29,33 +32,6 @@ def _load(p: Path) -> list[str]:
     return out
 
 
-# ---- List sanity ----
-
-def test_iphone_list_non_empty():
-    assert _load(IPHONE), "iphone-models.txt has no entries"
-
-
-def test_all_entries_are_valid_hostnames():
-    """RFC 952/1123: hostname is 1..63 chars of [A-Za-z0-9-]."""
-    pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
-    for name in _load(IPHONE):
-        assert pattern.match(name), \
-            f"{name!r} is not a valid hostname"
-        assert not name.endswith("-"), \
-            f"{name!r} ends with '-'"
-
-
-def test_no_duplicates():
-    names = _load(IPHONE)
-    assert len(names) == len(set(names)), \
-        "iphone-models.txt contains duplicates"
-
-
-# ---- End-to-end via installed picker ----
-
-FUNCTIONS_SH = ROOT / "files" / "lib" / "blue-merle" / "functions.sh"
-
-
 def _sh(script: str) -> str:
     return subprocess.run(
         ["/bin/sh", "-c", script],
@@ -63,33 +39,78 @@ def _sh(script: str) -> str:
     ).stdout
 
 
-def test_shell_picker_returns_something_from_the_list():
-    """Every pick must land in the model list."""
-    pool = set(_load(IPHONE))
+# ---- Composition ----
+
+def test_hostname_composition_mirrors_ios():
+    """iOS turns the device name "Emma's iPhone" into "Emmas-iPhone"
+    (apostrophe dropped, spaces become dashes)."""
+    script = f'''
+        . {FUNCTIONS_SH}
+        _iphone_hostname_from_name Emma
+        _iphone_hostname_from_name Anna
+        _iphone_hostname_from_name James
+    '''
+    out = _sh(script).strip().splitlines()
+    assert out == ["Emmas-iPhone", "Annas-iPhone", "Jamess-iPhone"], out
+
+
+def test_composed_hostname_is_rfc_valid_for_whole_pool():
+    """RFC 952/1123: letters/digits/hyphen, 1..63 chars — for every
+    name in the pool once composed into "<Name>s-iPhone"."""
+    pattern = re.compile(r"^[A-Za-z]+s-iPhone$")
+    for name in _load(NAMES):
+        hostname = f"{name}s-iPhone"
+        assert pattern.match(hostname), f"bad composed hostname: {hostname!r}"
+        assert len(hostname) <= 63, f"hostname too long: {hostname!r}"
+
+
+# ---- Picker ----
+
+def test_pick_iphone_name_returns_pool_entries():
+    pool = set(_load(NAMES))
     script = f'''
         . {FUNCTIONS_SH}
         for i in $(seq 20); do
-            _pick_random_line {IPHONE!s}
+            BLUE_MERLE_US_NAMES={NAMES!s} _pick_iphone_name
         done
     '''
     out = _sh(script).strip().splitlines()
+    assert len(out) == 20, out
     for got in out:
-        assert got in pool, f"picker returned {got!r} not in list"
+        assert got in pool, f"_pick_iphone_name returned {got!r} not in pool"
 
 
-def test_hostname_picker_does_not_always_return_first_line():
-    """Regression check for the 'iPhone-X on every reboot' bug: even if
-    the underlying random source misbehaves, _pick_random_line must
-    produce diverse output.
-    """
+def test_pick_iphone_name_rejects_poisoned_pool():
+    """Entries with spaces, apostrophes or digits must be rejected
+    outright — they must never reach a hostname or SSID."""
     script = f'''
         . {FUNCTIONS_SH}
-        for i in $(seq 25); do
-            _pick_random_line {IPHONE!s}
-        done
+        bad=$(mktemp)
+        printf '%s\\n' 'Two Words' "O'Brien" 'Anna1' > "$bad"
+        BLUE_MERLE_US_NAMES="$bad" _pick_iphone_name || echo REJECTED
+        rm -f "$bad"
     '''
     out = _sh(script).strip().splitlines()
-    unique = set(out)
-    # With 25 models and 25 draws, expect at least 5 distinct.
-    assert len(unique) >= 5, \
-        f"hostname picker too deterministic: {out}"
+    assert out == ["REJECTED"], out
+
+
+def test_pick_iphone_name_fails_on_missing_pool():
+    script = f'''
+        . {FUNCTIONS_SH}
+        BLUE_MERLE_US_NAMES=/nonexistent _pick_iphone_name || echo REJECTED
+    '''
+    out = _sh(script).strip().splitlines()
+    assert out == ["REJECTED"], out
+
+
+# ---- The old model pool is gone ----
+
+def test_model_pool_removed_and_unreferenced():
+    assert not (ROOT / "files" / "lib" / "blue-merle" / "iphone-models.txt").exists()
+    src = FUNCTIONS_SH.read_text(encoding="utf-8")
+    assert "iphone-models" not in src
+    assert "BLUE_MERLE_IPHONE_MODELS" not in src
+    # The Makefile must purge stale copies from the staged install dir
+    # (an untracked leftover must never slip into the ipk).
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "rm -f $(1)/lib/blue-merle/iphone-models.txt" in makefile

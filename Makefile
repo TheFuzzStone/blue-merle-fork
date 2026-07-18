@@ -47,6 +47,10 @@ define Package/blue-merle/install
 	# their working tree clean.
 	rm -f $(1)/etc/hotplug.d/iface/30-blue-merle-rerandomize
 	rm -f $(1)/lib/blue-merle/luhn.lua
+	# iphone-models.txt was the old hostname pool; hostnames are now
+	# composed from us-first-names.txt ("<Name>s-iPhone") so SSID and
+	# DHCP hostname corroborate. A stale copy must never ship.
+	rm -f $(1)/lib/blue-merle/iphone-models.txt
 	# Final scrub of Python bytecode and editor backups from the staged
 	# directory. This is the authoritative cleanup — the ipk never
 	# contains anything matched by these patterns.

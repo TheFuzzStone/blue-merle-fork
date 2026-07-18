@@ -2,6 +2,10 @@
 #
 # Rotate the AP SSID to a fresh "<Name>'s iPhone" without a reboot.
 #
+# The hostname is rotated along with it (to the matching
+# "<Name>s-iPhone") so the SSID and the DHCP hostname always tell the
+# same story — hostname changes are invisible to AP clients.
+#
 # The Wi-Fi password is *not* touched: clients only need to click
 # "Connect" on the new network and re-enter the same password they
 # used before.
@@ -42,24 +46,24 @@ case "$MODE" in
         exit 0
         ;;
     dry)
-        # Compose a candidate exactly the way RANDOMIZE_SSID does, but
-        # do not write anything.
-        names_file=${BLUE_MERLE_US_NAMES:-/lib/blue-merle/us-first-names.txt}
-        name=$(_pick_random_line "$names_file") || {
-            echo "Cannot read $names_file" >&2
+        # Compose a candidate exactly the way RANDOMIZE_IDENTITY does,
+        # but do not write anything.
+        name=$(_pick_iphone_name) || {
+            echo "Cannot read the first-name pool" >&2
             exit 1
         }
-        echo "Current SSID:  $current"
-        echo "Would set SSID: ${name}'s iPhone"
+        echo "Current SSID:       $current"
+        echo "Would set SSID:     ${name}'s iPhone"
+        echo "Would set hostname: $(_iphone_hostname_from_name "$name")"
         exit 0
         ;;
 esac
 
-echo "Rotating SSID (current: $current)..."
-RANDOMIZE_SSID || { echo "SSID rotation failed" >&2; exit 1; }
+echo "Rotating SSID+hostname (current: $current)..."
+RANDOMIZE_IDENTITY || { echo "Identity rotation failed" >&2; exit 1; }
 new=$(uci -q get wireless.@wifi-iface[0].ssid || echo "<unset>")
 if [ "$new" = "<unset>" ]; then
-    echo "SSID rotation failed" >&2
+    echo "Identity rotation failed" >&2
     exit 1
 fi
 echo "Reloading wifi..."
@@ -67,5 +71,6 @@ wifi reload || { echo "wifi reload failed" >&2; exit 1; }
 
 echo
 echo "Done. New SSID: $new"
+echo "Hostname synced: $(uci -q get system.@system[0].hostname || echo '<unknown>')"
 echo "Clients must click 'Connect' on the new network — the password is"
 echo "unchanged, so they can reuse the one they were already using."

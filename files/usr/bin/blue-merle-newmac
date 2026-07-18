@@ -21,8 +21,12 @@
 #   blue-merle-newmac --dry-run      # print the new values but do not apply
 #   blue-merle-newmac --hostname     # also rotate the hostname
 #   blue-merle-newmac --ssid         # also rotate the SSID
-#   blue-merle-newmac --full         # rotate MAC + hostname + SSID
-#                                      (equivalent to --hostname --ssid)
+#   blue-merle-newmac --full         # rotate MAC + hostname + SSID as one
+#                                      paired identity (single picked name)
+#
+# --hostname alone intentionally desyncs hostname from SSID (rotating
+# the SSID would kick AP clients); the pair resyncs at the next full
+# rotation. --ssid alone rotates SSID only.
 #
 # Exits 0 on success, non-zero on failure.
 
@@ -71,10 +75,11 @@ if [ "$DRY_RUN" = "1" ]; then
         printf '  network.@device[1].macaddr     = %s\n' "$(new_mac)"
     fi
     printf '  glconfig.general.macclone_addr  = %s\n' "$(new_mac)"
-    if [ "$ROTATE_HOSTNAME" = "1" ]; then
+    if [ "$ROTATE_HOSTNAME" = "1" ] && [ "$ROTATE_SSID" = "1" ]; then
+        echo "  (hostname+SSID would also be rotated as one paired identity)"
+    elif [ "$ROTATE_HOSTNAME" = "1" ]; then
         echo "  (hostname would also be rotated by RANDOMIZE_HOSTNAME)"
-    fi
-    if [ "$ROTATE_SSID" = "1" ]; then
+    elif [ "$ROTATE_SSID" = "1" ]; then
         echo "  (SSID would also be rotated by RANDOMIZE_SSID)"
     fi
     exit 0
@@ -99,11 +104,14 @@ if [ "$MODE" = "all" ]; then
         uci commit network
         uci commit glconfig
     fi
-    if [ "$ROTATE_HOSTNAME" = "1" ]; then
+    if [ "$ROTATE_HOSTNAME" = "1" ] && [ "$ROTATE_SSID" = "1" ]; then
+        # Paired rotation: SSID and hostname come from one picked name.
+        RANDOMIZE_IDENTITY || exit 1
+        /etc/init.d/system reload 2>/dev/null || true
+    elif [ "$ROTATE_HOSTNAME" = "1" ]; then
         RANDOMIZE_HOSTNAME || exit 1
         /etc/init.d/system reload 2>/dev/null || true
-    fi
-    if [ "$ROTATE_SSID" = "1" ]; then
+    elif [ "$ROTATE_SSID" = "1" ]; then
         RANDOMIZE_SSID || exit 1
     fi
     echo "Restarting wifi and network..."
@@ -131,11 +139,16 @@ else
     # so netifd re-attaches with the freshly-committed macaddr.
     uci set glconfig.general.macclone_addr="$(new_mac)" || exit 1
     uci commit glconfig || exit 1
-    if [ "$ROTATE_HOSTNAME" = "1" ]; then
+    if [ "$ROTATE_HOSTNAME" = "1" ] && [ "$ROTATE_SSID" = "1" ]; then
+        # SSID change with --uplink still forces AP clients to reconnect.
+        echo "Note: --full with --uplink still kicks AP clients (SSID change)."
+        RANDOMIZE_IDENTITY || exit 1
+        /etc/init.d/system reload 2>/dev/null || true
+        wifi reload || exit 1
+    elif [ "$ROTATE_HOSTNAME" = "1" ]; then
         RANDOMIZE_HOSTNAME || exit 1
         /etc/init.d/system reload 2>/dev/null || true
-    fi
-    if [ "$ROTATE_SSID" = "1" ]; then
+    elif [ "$ROTATE_SSID" = "1" ]; then
         # SSID change with --uplink still forces AP clients to
         # reconnect; document that explicitly.
         echo "Note: --ssid with --uplink still kicks AP clients."

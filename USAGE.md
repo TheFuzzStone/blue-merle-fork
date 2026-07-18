@@ -53,10 +53,10 @@ swap SIM before powering back on.
 ## Rotate MAC / SSID (no reboot)
 
 ```sh
-blue-merle-newmac --full          # all MACs + hostname + SSID
+blue-merle-newmac --full          # all MACs + paired hostname/SSID identity
 blue-merle-newmac --uplink        # only upstream MAC (AP clients stay)
 blue-merle-newmac --pure-random   # RFC-7844 MAC instead of Apple OUI
-blue-merle-newssid                # only SSID
+blue-merle-newssid                # SSID + synced hostname
 ```
 
 ## Configuration
@@ -76,16 +76,16 @@ uci set blue-merle.main.tac_mode=phone && uci commit blue-merle     # or 'module
 **Edit pools:**
 
 ```sh
-vi /lib/blue-merle/{iphone-models,apple-oui,us-first-names,tac-list,tac-list-phone}.txt
+vi /lib/blue-merle/{apple-oui,us-first-names,tac-list,tac-list-phone}.txt
 ```
 
-One entry per line, `#` = comment. hostname: `[A-Za-z0-9-]` ≤ 63 chars.
+One entry per line, `#` = comment.
 OUI: lowercase `aa:bb:cc`. Names: ASCII letters only. TAC: 8 digits.
 `service blue-merle reload` applies without reboot.
 
 **Env overrides:** `BLUE_MERLE_TTY`, `BLUE_MERLE_FORCE=1`, `BM_READ_TRIES`,
 `BLUE_MERLE_TAC`, `BLUE_MERLE_TAC_LIST`, `BLUE_MERLE_APPLE_OUI`,
-`BLUE_MERLE_IPHONE_MODELS`, `BLUE_MERLE_US_NAMES`.
+`BLUE_MERLE_US_NAMES`.
 
 **Disable features:**
 
@@ -128,7 +128,7 @@ uci commit && reboot
 blue-merle                                # interactive IMEI change
 blue-merle-newmac --full                  # rotate everything
 blue-merle-newmac --uplink                # only upstream MAC
-blue-merle-newssid                        # only SSID
+blue-merle-newssid                        # SSID + synced hostname
 /usr/libexec/blue-merle read-identifiers  # masked IMEI+IMSI (JSON)
 /usr/libexec/blue-merle prepare-sim-swap  # atomic RF-off + interim IMEI
 /usr/libexec/blue-merle shutdown           # power off via MCU

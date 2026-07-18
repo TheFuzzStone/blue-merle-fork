@@ -53,10 +53,10 @@ blue-merle    # → y → заменить SIM → r → s (shutdown, смени
 ## Ротация MAC / SSID (без reboot)
 
 ```sh
-blue-merle-newmac --full          # все MAC + hostname + SSID
+blue-merle-newmac --full          # все MAC + парная идентичность hostname/SSID
 blue-merle-newmac --uplink        # только upstream MAC (клиенты остаются)
 blue-merle-newmac --pure-random   # RFC-7844 MAC вместо Apple OUI
-blue-merle-newssid                # только SSID
+blue-merle-newssid                # SSID + синхронизированный hostname
 ```
 
 ## Настройка
@@ -76,16 +76,16 @@ uci set blue-merle.main.tac_mode=phone && uci commit blue-merle     # или 'mo
 **Редактирование пулов:**
 
 ```sh
-vi /lib/blue-merle/{iphone-models,apple-oui,us-first-names,tac-list,tac-list-phone}.txt
+vi /lib/blue-merle/{apple-oui,us-first-names,tac-list,tac-list-phone}.txt
 ```
 
-Одна запись на строку, `#` = комментарий. hostname: `[A-Za-z0-9-]` ≤ 63.
+Одна запись на строку, `#` = комментарий.
 OUI: `aa:bb:cc` lowercase. Имена: только ASCII-буквы. TAC: 8 цифр.
 `service blue-merle reload` применяет без reboot.
 
 **Переменные окружения:** `BLUE_MERLE_TTY`, `BLUE_MERLE_FORCE=1`,
 `BM_READ_TRIES`, `BLUE_MERLE_TAC`, `BLUE_MERLE_TAC_LIST`,
-`BLUE_MERLE_APPLE_OUI`, `BLUE_MERLE_IPHONE_MODELS`, `BLUE_MERLE_US_NAMES`.
+`BLUE_MERLE_APPLE_OUI`, `BLUE_MERLE_US_NAMES`.
 
 **Отключение функций:**
 
@@ -128,7 +128,7 @@ uci commit && reboot
 blue-merle                                # интерактивная смена IMEI
 blue-merle-newmac --full                  # ротация всего
 blue-merle-newmac --uplink                # только upstream MAC
-blue-merle-newssid                        # только SSID
+blue-merle-newssid                        # SSID + синхронизированный hostname
 /usr/libexec/blue-merle read-identifiers  # маскированные IMEI+IMSI (JSON)
 /usr/libexec/blue-merle prepare-sim-swap  # атомарно RF-off + interim IMEI
 /usr/libexec/blue-merle shutdown           # выключение через MCU

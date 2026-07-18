@@ -294,28 +294,49 @@ _pick_random_line () {
     grep -vE '^\s*(#|$)' "$file" | sed -n "${idx}p"
 }
 
+# Pick one valid US first name for the masquerade identity and print
+# it on stdout. Returns 1 when the pool is missing/unreadable or the
+# picked entry is not pure ASCII letters — callers must treat that as
+# "no identity change" rather than fall back to garbage.
+_pick_iphone_name () {
+    local names_file=${BLUE_MERLE_US_NAMES:-/lib/blue-merle/us-first-names.txt}
+    local name
+    name=$(_pick_random_line "$names_file") || return 1
+    case "$name" in
+        ''|*[!A-Za-z]*) return 1 ;;
+    esac
+    printf '%s\n' "$name"
+}
+
+# iOS derives the DHCP hostname from the device name by dropping
+# apostrophes and turning spaces into dashes: "Emma's iPhone" becomes
+# "Emmas-iPhone". Mirror that so the hostname tells exactly the same
+# story as the Personal-Hotspot SSID.
+_iphone_hostname_from_name () {
+    printf '%ss-iPhone\n' "$1"
+}
+
 # Randomize the hostname so DHCP requests / mDNS don't advertise the
 # stable "Mudi-<serial suffix>" identifier across sessions.
 #
-# Picks a random model from /lib/blue-merle/iphone-models.txt. Combined
-# with APPLE_MAC_GEN'd MACs, upstream DHCP/mDNS sees a consistent
-# "iPhone" story (matching hostname + Apple OUI + Personal-Hotspot SSID).
+# Real iPhones send the *device name* ("Emmas-iPhone"), never a model
+# string — an "iPhone-15-Pro" hostname is a passive tell that the
+# device is not an iPhone. The hostname is therefore composed from the
+# same first-name pool as the SSID. Prefer RANDOMIZE_IDENTITY wherever
+# the SSID is rotated too; standalone use desyncs the pair until the
+# next full rotation (accepted for `blue-merle-newmac --hostname`,
+# which must not kick AP clients by changing the SSID).
 RANDOMIZE_HOSTNAME () {
-    local iphone_file=${BLUE_MERLE_IPHONE_MODELS:-/lib/blue-merle/iphone-models.txt}
-    local model
-    model=$(_pick_random_line "$iphone_file")
-
-    # Guard against missing list, pathological entries, or invalid chars.
-    # A hostname must match RFC 952/1123: letters/digits/hyphen, 1..63 chars.
-    case "$model" in
-        ''|*[!A-Za-z0-9-]*)
-            local suffix
-            suffix=$(printf '%04x' "$(_rand16)")
-            model="Mudi-${suffix}"
-            ;;
-    esac
-
-    uci set system.@system[0].hostname="$model" || return 1
+    local name hostname
+    name=$(_pick_iphone_name) || name=""
+    if [ -n "$name" ]; then
+        hostname=$(_iphone_hostname_from_name "$name")
+    else
+        # Pool unavailable: keep a plausible iPhone-style name. Never
+        # fall back to "Mudi-*" — that re-exposes the device type.
+        hostname="iPhone-$(printf '%04x' "$(_rand16)")"
+    fi
+    uci set system.@system[0].hostname="$hostname" || return 1
     uci commit system || return 1
     # /etc/init.d/system reload picks it up.
 }
@@ -332,23 +353,38 @@ RANDOMIZE_HOSTNAME () {
 # The Wi-Fi password is deliberately not touched: rotating both SSID
 # and password on every reboot would force the user to re-enter the
 # key on every client, every time.
+# NOTE: rotates the SSID only, leaving the hostname pointing at the
+# previous identity. Callers that kick clients anyway should prefer
+# RANDOMIZE_IDENTITY so the pair stays consistent.
 RANDOMIZE_SSID () {
-    local names_file=${BLUE_MERLE_US_NAMES:-/lib/blue-merle/us-first-names.txt}
     local name
-    name=$(_pick_random_line "$names_file")
-
-    # Guard: allow ASCII letters only. Anything unexpected -> silently
-    # bail out so we don't smash the existing SSID with garbage.
-    case "$name" in
-        ''|*[!A-Za-z]*)
-            return 1
-            ;;
-    esac
+    name=$(_pick_iphone_name) || return 1
 
     local ssid="${name}'s iPhone"
 
     # Apply to both bands. `uci -q ... || true` protects the case where
     # wifi-iface[1] is disabled or missing (e.g. user runs 5 GHz only).
+    uci set wireless.@wifi-iface[0].ssid="$ssid" || return 1
+    uci -q set wireless.@wifi-iface[1].ssid="$ssid" 2>/dev/null || true
+    uci commit wireless || return 1
+}
+
+# Rotate SSID *and* hostname as one paired identity built from a single
+# picked name: downstream clients and nearby observers see
+# "<Name>'s iPhone", upstream DHCP/mDNS sees "<Name>s-iPhone" — the two
+# always corroborate, like a real iPhone. Independent picks produced
+# mismatches ("Emma's iPhone" SSID + "iPhone-XR" hostname) that an
+# observer able to see both (e.g. a hotel network also scanning RF)
+# could flag as anomalous.
+RANDOMIZE_IDENTITY () {
+    local name ssid
+    name=$(_pick_iphone_name) || return 1
+    ssid="${name}'s iPhone"
+
+    uci set system.@system[0].hostname="$(_iphone_hostname_from_name "$name")" || return 1
+    uci commit system || return 1
+
+    # Same dual-band handling as RANDOMIZE_SSID.
     uci set wireless.@wifi-iface[0].ssid="$ssid" || return 1
     uci -q set wireless.@wifi-iface[1].ssid="$ssid" 2>/dev/null || true
     uci commit wireless || return 1

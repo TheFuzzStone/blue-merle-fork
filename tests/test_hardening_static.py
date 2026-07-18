@@ -82,7 +82,7 @@ def test_luci_tac_acl_uses_exact_subcommands_without_arguments():
 def test_network_tools_check_failures_before_reporting_success():
     newssid = _read("files/usr/bin/blue-merle-newssid")
     newmac = _read("files/usr/bin/blue-merle-newmac")
-    assert 'RANDOMIZE_SSID ||' in newssid
+    assert 'RANDOMIZE_IDENTITY ||' in newssid
     assert 'wifi reload ||' in newssid
     assert 'ifdown "$_iface"' in newmac and 'ifdown $_iface failed' in newmac
     assert 'ifup "$_iface"' in newmac and 'ifup $_iface failed' in newmac
@@ -103,10 +103,32 @@ def test_package_has_uninstall_lifecycle_cleanup():
     assert "/etc/init.d/gl_clients start" in makefile
 
 
-def test_reload_rotates_hostname_when_identity_is_not_stable():
+def test_reload_rotates_identity_when_identity_is_not_stable():
     src = _read("files/etc/init.d/blue-merle")
     reload_block = src.split("reload()", 1)[1]
-    assert "RANDOMIZE_HOSTNAME || return 1" in reload_block
+    assert "RANDOMIZE_IDENTITY || return 1" in reload_block
+
+
+def test_boot_and_full_rotation_use_paired_identity():
+    # Boot rotation and `blue-merle-newmac --full` must rotate SSID and
+    # hostname from a single picked name — independent picks desync the
+    # pair ("Emma's iPhone" SSID with an "iPhone-XR" hostname), a
+    # passive tell for an observer who can see both.
+    init = _read("files/etc/init.d/blue-merle")
+    start_block = init.split("start()", 1)[1].split("}", 1)[0]
+    assert "RANDOMIZE_IDENTITY || return 1" in start_block
+    assert "RANDOMIZE_HOSTNAME" not in start_block
+    assert "RANDOMIZE_SSID" not in start_block
+
+    newmac = _read("files/usr/bin/blue-merle-newmac")
+    assert "RANDOMIZE_IDENTITY || exit 1" in newmac
+
+    functions = _read("files/lib/blue-merle/functions.sh")
+    assert "RANDOMIZE_IDENTITY ()" in functions
+    assert "_iphone_hostname_from_name ()" in functions
+    # The paired helper must compose from ONE pick, not two.
+    block = functions.split("RANDOMIZE_IDENTITY ()", 1)[1]
+    assert block.count("_pick_iphone_name") == 1
 
 
 def test_privacy_mounts_verify_tmpfs_type():

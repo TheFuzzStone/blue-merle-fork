@@ -56,13 +56,14 @@ Reconnect with the **same password** — it never rotates.
 ### Anonymity features
 
 - Apple OUI MAC pool (30 prefixes) — vendor lookup matches iPhone hostname
-- iPhone hostname pool (25 models) — replaces `Mudi-<serial>`
-- Personal-Hotspot SSID (`<Name>'s iPhone`, 244 names) — replaces `GL-E750-<serial>`
+- Paired iPhone identity: one picked name → SSID `<Name>'s iPhone` +
+  hostname `<Name>s-iPhone` (244 names) — replaces `GL-E750-<serial>`
+  and `Mudi-<serial>`; the two corroborate like a real iPhone
 - TAC policy: module mode preserves baseline modem TAC; phone mode is
   user-supplied and fail-closed (no guessed GSMA data shipped)
 - Ethernet MAC + hostname + per-uplink MAC rotation
 - `blue-merle-newmac`/`newssid` CLIs (`--uplink`, `--full`, `--dry-run`, `--pure-random`)
-- Hotplug BSSID on `ifdown`; upstream MAC on `ifup`; both respect `stable_identity`
+- Hotplug BSSID + upstream MAC rotation on `ifdown`; both respect `stable_identity`
 - `stable_identity` UCI flag — freeze all identifiers across reboots
 - tmpfs started and verified immediately at install (no flash-leak window)
 - Fresh client-MAC database on each boot (no historical import)

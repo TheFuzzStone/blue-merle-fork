@@ -88,4 +88,6 @@ python3 tests/run_all.py   # all must pass
   fail-closed invariants as stage2 (`_write_runtime_imei`, poweroff).
 - TAC UI/comments must not claim `86xx`=module / `35xx`=phone; prefixes
   don't encode device class.
+- Hostname must mirror the SSID name (`RANDOMIZE_IDENTITY`); iPhones
+  send the device name (`Emmas-iPhone`), never a model string.
 - `__pycache__` → `rm -rf` before `git add`; Makefile scrubs staged dir.
