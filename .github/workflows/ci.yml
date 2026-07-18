@@ -11,8 +11,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Syntax-check shell files
+        run: |
+          find files/usr/bin files/usr/libexec files/etc/init.d \
+               files/etc/hotplug.d files/etc/gl-switch.d \
+               -type f -print0 | xargs -0 -n1 sh -n
+          sh -n files/lib/blue-merle/functions.sh
+          sh -n tools/blue-merle-diag.sh
+      - name: Run unit tests
+        run: python3 tests/run_all.py
+
   build-packages:
     name: Build Packages
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

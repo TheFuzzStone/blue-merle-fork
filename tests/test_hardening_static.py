@@ -172,6 +172,37 @@ def test_tac_mode_ui_makes_no_device_class_claims():
         assert "35xx" not in src, path
 
 
+def test_ci_runs_unit_tests_and_shell_syntax_checks():
+    ci = _read(".github/workflows/ci.yml")
+    assert "python3 tests/run_all.py" in ci
+    assert "sh -n" in ci
+    # The package build must not publish artifacts for failing code.
+    assert "needs: test" in ci
+
+
+def test_diag_script_is_versioned_and_masks_identifiers():
+    # The on-device diagnostic used to live only in the gitignored
+    # dist/ directory — untracked and easy to lose. It must stay under
+    # version control, and it must mask every identifier class.
+    diag = _read("tools/blue-merle-diag.sh")
+    assert "mask_id()" in diag
+    assert "mask_mac()" in diag
+    assert "mask_name()" in diag
+    # The removed model pool must not be probed anymore.
+    assert "iphone-models" not in diag
+
+
+def test_write_runtime_imei_updates_every_modem_dir():
+    src = _read("files/lib/blue-merle/functions.sh")
+    block = src.split("_write_runtime_imei ()", 1)[1].split("\n}", 1)[0]
+    # With several /tmp/modem.*/ candidates the alphabetically-first may
+    # belong to a different modem; every integration dir is updated.
+    assert "for modem_dir in /tmp/modem.*/" in block
+    assert "head -n1" not in block
+    # The volatile store remains the fail-closed gate.
+    assert "_is_tmpfs_mount /root/esim" in block
+
+
 def test_tac_lists_do_not_ship_unverified_values():
     for path in (
         "files/lib/blue-merle/tac-list.txt",

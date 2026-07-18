@@ -111,16 +111,25 @@ _is_valid_imei_shape () {
 
 # Update integration files only when their backing storage is volatile.
 _write_runtime_imei () {
-    local imei=$1 modem_dir
+    local imei=$1 modem_dir wrote=0
     _is_valid_imei_shape "$imei" || return 1
     _is_tmpfs_mount /root/esim || return 1
 
-    modem_dir=$(ls -d /tmp/modem.*/ 2>/dev/null | head -n1)
-    if [ -z "$modem_dir" ]; then
+    # Write to every modem integration dir present. With several
+    # /tmp/modem.*/ candidates (USB re-enumeration, stale entries) the
+    # alphabetically-first one may belong to a different modem, leaving
+    # the active integration without an update. All of these dirs are
+    # tmpfs and per-boot, so updating each is cheap and safe.
+    for modem_dir in /tmp/modem.*/; do
+        [ -d "$modem_dir" ] || continue
+        printf '%s' "$imei" > "${modem_dir%/}/modem-imei" || return 1
+        wrote=1
+    done
+    if [ "$wrote" -eq 0 ]; then
         modem_dir=/tmp/modem.1-1.2/
         mkdir -p "$modem_dir" || return 1
+        printf '%s' "$imei" > "${modem_dir%/}/modem-imei" || return 1
     fi
-    printf '%s' "$imei" > "${modem_dir%/}/modem-imei" || return 1
 
     printf '%s' "$imei" > /root/esim/imei || return 1
     rm -f /root/esim/log.txt 2>/dev/null || true

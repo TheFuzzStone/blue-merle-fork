@@ -5,7 +5,8 @@
 # device (iPhone / iPad / MacBook / AirPods) to any DHCP server or
 # WiFi tracker doing vendor lookup.
 #
-# Trade-offs (see LOCAL_CHANGES.md for the full note):
+# Trade-offs (see README.md sections "Anonymity features" and
+# "Threat-model tradeoff" for the full note):
 #   + Matches the iPhone/iPad hostname we advertise.
 #   + Avoids the "locally-administered bit set" flag that WIDS
 #     systems interpret as "randomized/spoofed MAC".
