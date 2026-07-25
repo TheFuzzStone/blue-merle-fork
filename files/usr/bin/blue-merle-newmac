@@ -24,6 +24,10 @@
 #   blue-merle-newmac --full         # rotate MAC + hostname + SSID as one
 #                                      paired identity (single picked name)
 #
+# Combined with --uplink, --full rotates only the uplink MAC + the
+# paired identity (hostname+SSID); BSSIDs/AP-side MACs stay untouched
+# (the SSID change still forces AP clients to reconnect).
+#
 # --hostname alone intentionally desyncs hostname from SSID (rotating
 # the SSID would kick AP clients); the pair resyncs at the next full
 # rotation. --ssid alone rotates SSID only.
@@ -54,7 +58,7 @@ for arg in "$@"; do
         --ssid) ROTATE_SSID=1 ;;
         --full) ROTATE_HOSTNAME=1; ROTATE_SSID=1 ;;
         -h|--help)
-            sed -n 's/^# \{0,1\}//p' "$0" | sed -n '3,28p'
+            sed -n 's/^# \{0,1\}//p' "$0" | sed -n '3,34p'
             exit 0
             ;;
         *)

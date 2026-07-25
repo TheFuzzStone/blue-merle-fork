@@ -20,6 +20,10 @@ _announce_ssid_on_mcu() {
 	[ -c /dev/ttyS0 ] || return 0
 	local ssid
 	ssid=$(uci -q get wireless.@wifi-iface[0].ssid) || return 0
+	# Custom user SSIDs may contain characters that would break the
+	# JSON we embed into the ttyS0 write (the MCU's tolerance for
+	# malformed JSON is unverified) — strip them before embedding.
+	ssid=$(printf '%s' "$ssid" | tr -d '"\\')
 	# MCU display is 16 x 2 characters; the JSON wrapper trims long
 	# strings automatically. Format: label on line 1, SSID on line 2.
 	printf '{"msg":"WiFi:           %s"}\n' "$ssid" > /dev/ttyS0

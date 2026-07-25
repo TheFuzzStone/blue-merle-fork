@@ -20,16 +20,17 @@ case "$action" in
         ;;
 esac
 
-# Mark this invocation as "driven by the physical toggle" so that stage1's
-# CHECK_ABORT does not immediately kill the process on the first modem
-# retry (the switch file is legitimately "off" until we write "on" below).
-mkdir -p /tmp/blue-merle
-: > /tmp/blue-merle/toggle-driven
-
 if [ "$action" = "on" ]; then
     mcu_send_message "Blue Merle ${action}"
     echo "on" > /tmp/sim_change_switch
     logger -p notice -t blue-merle-toggle "Running Stage 1"
+    # Mark this invocation as driven by the physical toggle so stage1's
+    # CHECK_ABORT engages: if the user pulls the switch back mid-stage,
+    # the off-branch below flips /tmp/sim_change_switch to "off" and
+    # CHECK_ABORT exits stage1 cleanly. The marker lives only for the
+    # stage-1 run — it must never be present outside stage1's lifetime.
+    mkdir -p /tmp/blue-merle
+    : > /tmp/blue-merle/toggle-driven
     # The timeout must exceed the stage's own worst-case budget
     # (CFUN retries + EGMR + readbacks + MCU sleeps ≈ 100 s), or a
     # SIGTERM can land between the EGMR write and the runtime-store

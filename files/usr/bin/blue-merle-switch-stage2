@@ -33,7 +33,9 @@ fi
 
 mcu_send_message "Switch pulled.  Continuing..."
 sleep 1
-sim_switch on
+# The switch-state marker (/tmp/sim_change_switch) is owned by sim.sh
+# and consulted only by stage1's CHECK_ABORT. Stage2 never aborts, so
+# the historical `sim_switch on` here was vestigial and got removed.
 
 leak=0
 max_cfun_retries=30

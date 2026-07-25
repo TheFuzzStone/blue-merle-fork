@@ -440,6 +440,109 @@ def test_cli_cfun4_retry_loop_is_bounded_and_eof_safe():
     assert "read -r reply ||" in block
 
 
+def test_stage2_does_not_touch_switch_state_marker():
+    """`sim_switch on` in stage2 was vestigial: the /tmp/sim_change_switch
+    marker is written by sim.sh and read only by stage1's CHECK_ABORT —
+    stage2 never aborts, and the tmpfs marker is wiped by the poweroff
+    that ends stage2 anyway. Nobody may write it from stage2; stage1
+    must still initialise it when missing (CHECK_ABORT needs a defined
+    state on manual invocation)."""
+    stage2 = _read("files/usr/bin/blue-merle-switch-stage2")
+    for line in stage2.splitlines():
+        if line.strip().startswith("#"):
+            continue
+        assert "sim_switch" not in line, f"stage2 writes switch state: {line}"
+    stage1 = _read("files/usr/bin/blue-merle-switch-stage1")
+    assert "sim_switch off" in stage1
+
+
+def test_toggle_driven_marker_scoped_to_stage1():
+    """/tmp/blue-merle/toggle-driven tells stage1's CHECK_ABORT that the
+    run was toggle-driven. Creating it unconditionally (also for the
+    off/stage2 branch) left it present outside stage1's lifetime; it
+    must be created only in the on-branch, right before the stage-1
+    flock."""
+    src = _read("files/etc/gl-switch.d/sim.sh")
+    create = ': > /tmp/blue-merle/toggle-driven'
+    on_branch = src.split('if [ "$action" = "on" ]; then', 1)[1]
+    on_branch = on_branch.split('elif [ "$action" = "off" ]', 1)[0]
+    assert create in on_branch, "marker not created in the on-branch"
+    assert on_branch.index(create) < on_branch.index("flock -n"), (
+        "marker must be created before the stage-1 flock"
+    )
+    off_branch = src.split('elif [ "$action" = "off" ]; then', 1)[1]
+    assert create not in off_branch, "marker must not be created for stage2"
+
+
+def test_newmac_help_documents_uplink_full_scope():
+    """`--full` under `--uplink` rotates only the uplink MAC + the paired
+    identity (hostname+SSID) — BSSIDs/AP-side MACs stay untouched. The
+    help text (the exact lines the script prints) must say so, and must
+    not truncate the trailing --hostname/--ssid note mid-sentence."""
+    import re
+    import subprocess
+
+    src = _read("files/usr/bin/blue-merle-newmac")
+    m = re.search(r"sed -n '(\d+),(\d+)p'", src)
+    assert m, "help print range not found"
+    start, end = m.group(1), m.group(2)
+    newmac = ROOT / "files" / "usr" / "bin" / "blue-merle-newmac"
+    out = subprocess.run(
+        ["sh", "-c", f"sed -n 's/^# \\{{0,1\\}}//p' {newmac} | sed -n '{start},{end}p'"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert "--uplink" in out, "help does not mention the --uplink combination"
+    assert "BSSID" in out, "help does not state BSSIDs stay untouched"
+    assert "rotation. --ssid alone rotates SSID only." in out, (
+        "trailing note truncated mid-sentence (help print range too short)"
+    )
+
+
+def test_announce_ssid_strips_json_breakers():
+    """A custom user SSID containing a double quote or backslash would
+    break the JSON embedded into the MCU ttyS0 write. The announce
+    helper must strip both characters before embedding."""
+    src = _read("files/etc/init.d/blue-merle")
+    block = src.split("_announce_ssid_on_mcu()", 1)[1].split("\n}", 1)[0]
+    needle = "tr -d '" + '"' + "\\" * 2 + "'"
+    assert needle in block, "no quote/backslash stripping in _announce_ssid_on_mcu"
+    assert block.index(needle) < block.index('printf \'{"msg"'), (
+        "stripping must happen before the JSON printf"
+    )
+
+
+def test_announce_ssid_tr_pipeline_yields_valid_json():
+    """Functional counterpart: the exact tr/printf pipeline used by
+    _announce_ssid_on_mcu turns a hostile SSID into valid JSON with no
+    residual quote or backslash."""
+    import json
+    import subprocess
+
+    script = (
+        "ssid='My \"Quoted\" \\ SSID'\n"
+        "ssid=$(printf '%s' \"$ssid\" | tr -d '\"\\\\')\n"
+        "printf '{\"msg\":\"WiFi:           %s\"}\\n' \"$ssid\"\n"
+    )
+    out = subprocess.run(
+        ["sh", "-c", script], capture_output=True, text=True, check=True,
+    ).stdout
+    msg = json.loads(out)["msg"]
+    assert '"' not in msg and "\\" not in msg, msg
+    assert msg == "WiFi:           My Quoted  SSID", msg
+
+
+def test_ci_pins_shellcheck_tarball_and_skips_feeds():
+    """The shellcheck tarball must be verified by SHA256 (supply-chain
+    pin), and the build must not run `feeds update` — the package is
+    verified to build without it (EXTRA_DEPENDS is metadata-only), which
+    the AGENTS.md handoff documents."""
+    ci = _read(".github/workflows/ci.yml")
+    assert "sha256sum -c" in ci, "shellcheck tarball not pinned by SHA256"
+    assert "feeds update" not in ci, "feeds update crept back into CI"
+    agents = _read("AGENTS.md")
+    assert "without `feeds update`" in agents
+
+
 def test_volatile_client_macs_guards_running_gl_clients():
     """Mounting tmpfs over /etc/oui-tertf while gl_clients has the
     SQLite db open corrupts the db (gl_clients keeps an fd to the
