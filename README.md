@@ -104,3 +104,17 @@ make defconfig
 make -j"$(nproc)" package/blue-merle/compile V=s
 # ipk: bin/packages/mips_24kc/base/
 ```
+
+## Donations
+
+Monero (XMR):
+
+`88P6A1KHRhL6WxnMAUf2RF8q3kSMLrV1mZoojap8bXkxhaP14yqVzHyBRfgKTMB9rRFpv9C6raq1e9fp1pVUC2dEEzod6aA`
+
+Bitcoin (Lightning):
+
+`thefuzzstone@npub.cash`
+
+Ethereum (ETH)
+
+`0x5d16518610D401842327A5533eDa97511c94e754`
