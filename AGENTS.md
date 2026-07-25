@@ -27,6 +27,9 @@ running local-33 — verified on the official package files: version,
 hooks, python deps, read-identifiers `868186******309`, rotation
 (sta uci == runtime == macclone, ~2 s, fresh DHCP lease). Remaining
 checklist items need 2 SIMs → `SIM-SESSION-CHECKLIST.md` (gitignored).
+Queue re-prioritised same day by user decision: Top-4 (volatile uplink
+history → iOS DHCP fingerprint → Apple vendor IE → GL telemetry
+"go dark") then Second tier — see Queue. UNCOMMITTED.
 
 Session checklist record: base state ✅ →
 paired identity at reboot ✅ (all identifiers rotated, WiFi key md5
@@ -119,18 +122,64 @@ the toggle/CLI paths. The package builds without `feeds update`
 
 ### Queue (priority order)
 
-1. **Hardware testing on the Mudi** — remaining items all need 2 SIM
-   cards (user will buy): toggle flow (= the MCU pagination test) →
-   CLI → anti-forensics → uninstall. The full step-by-step lives in
+0. **Hardware testing on the Mudi — BLOCKED on 2 physical SIM cards**
+   (user will buy): toggle flow (= the MCU pagination test) → CLI →
+   anti-forensics → uninstall. The full step-by-step lives in
    `SIM-SESSION-CHECKLIST.md` (gitignored, on the user's machine).
    Everything automatable was done 2026-07-25 (see Current status).
-2. **TAC proposals — awaiting user decision:** (a) document obtaining
-   provenance TACs + `original_tac` override; (b) LuCI read-only TAC
-   status (mode + baseline present/absent — never the value, it reveals
-   8/15 IMEI digits); (c) log line when postinst baseline capture
-   fails; (d) optional `blue-merle-tac info` CLI.
-3. **DHCP fingerprinting** (udhcpc PRL/options vs iOS) — research +
-   hardware.
+
+**Top-4 (do in this order — all seen first-hand on hardware):**
+
+1. **Volatile uplink history.** `wireless.sta` persists every upstream
+   network (SSID + BSSID + key) on NAND — a geolocatable movement log
+   (BSSID → WiGLE) of everywhere the router has been. Options: never
+   commit sta config to NAND (tmpfs shadow), or `blue-merle-purge-history`
+   + auto-purge on network change. Biggest open anti-forensics hole.
+2. **iOS-faithful DHCP fingerprint.** Masquerade contradicts itself at
+   L3: Apple MAC + `Lucass-iPhone` hostname, but udhcpc sends a
+   Linux-grade PRL/option set/vendor class — one packet gives it away.
+   Research the exact iOS DHCPDISCOVER/REQUEST (PRL order, option set,
+   no vendor class) and mimic it (udhcpc knobs or a shim). Absorbs the
+   old queue item "DHCP fingerprinting".
+3. **Apple vendor IE in beacons.** A real iPhone hotspot carries Apple
+   vendor-specific IEs in beacon/probe-response; ours broadcasts plain
+   hostapd frames. `hostapd` accepts `vendor_elements=hex` — research
+   the exact bytes of an iOS Personal Hotspot beacon and apply them
+   (per-radio; keep within the 750-byte IE limit).
+4. **GL telemetry audit + "go dark" switch.** `99-gl-cloud` (GoodCloud/
+   DDNS) calls home to GL servers — an "iPhone" talking to a router
+   vendor's cloud is a self-own, besides the privacy leak. Inventory
+   everything that phones home (gl-cloud, gl_health, cron jobs), then
+   one UCI switch to silence it all.
+
+**Second tier (in this order):**
+
+5. **Ship the selftest.** `tools/blue-merle-diag.sh` is not in the ipk
+   — package it (redacted) + a LuCI status page so users can verify
+   masquerade coherence themselves (hostname↔SSID, pool MACs, tmpfs,
+   no IMEI in logs).
+6. **Guest SSID de-fingerprinting.** Both guest networks still broadcast
+   (disabled, but configured) `GL-E750-a19-Guest` — one toggle and the
+   hardware model is on the air. Rotate/rename alongside the main SSID
+   or neutralise the defaults at install.
+7. **Uplink-interface leak audit.** What else escapes via wlan-sta0/
+   wwan0: avahi/mDNS announcements, IPv6 (RA/MLD/DHCPv6 link-local),
+   `modem_AT` log destinations, GL persistent logs (`gl_logread`).
+   Audit first, then plug.
+8. **NAND wear + flash history.** Several `uci commit` per boot leave
+   stale identifiers in erase blocks (README admits it) and wear NAND.
+   Minimum: batch commits (one per file). Maximum: volatile store for
+   rotated values.
+9. **Session smalls.** Boot-time `logger` from S10 is lost (logd starts
+   at S12log) — buffer and flush later. `/etc/mcuversion` absent on
+   FW 4.3.26 — find where GL exposes the MCU version and fix the
+   postinst/diag detection.
+
+10. **TAC proposals — awaiting user decision:** (a) document obtaining
+    provenance TACs + `original_tac` override; (b) LuCI read-only TAC
+    status (mode + baseline present/absent — never the value, it reveals
+    8/15 IMEI digits); (c) log line when postinst baseline capture
+    fails; (d) optional `blue-merle-tac info` CLI.
 
 ### Session log 2026-07-25 (steps 1-7)
 
