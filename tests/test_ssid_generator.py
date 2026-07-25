@@ -170,3 +170,39 @@ def test_shell_picker_returns_something_from_the_pool():
     out = _sh(script).strip().splitlines()
     for got in out:
         assert got in pool, f"picker returned {got!r} not in pool"
+
+
+def test_picker_ignores_whitespace_prefixed_comments_and_blank_lines():
+    """The picker must exclude comments and blank lines even when they
+    are indented. With the old '^\\s*(#|$)' pattern this only worked on
+    GNU grep; busybox (musl ERE, no \\s) reads it as literal 's' and
+    would happily pick a whitespace-only line as a name. On the dev
+    host (GNU grep) this passes either way — the static
+    test_no_backslash_s_in_shell_files is the proven regression gate —
+    but this pins the behavioural contract everywhere, including
+    busybox on-target."""
+    import tempfile
+
+    valid = {"Anna", "Beatrice", "Claudia"}
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write("# column-zero comment\n")
+        f.write("   # leading-whitespace comment\n")
+        f.write("\t# tab-prefixed comment\n")
+        for name in sorted(valid):
+            f.write(f"{name}\n")
+        f.write("   \n")       # whitespace-only: spaces
+        f.write(" \t \n")      # whitespace-only: spaces + tab
+        pool_path = f.name
+    try:
+        script = f'''
+            . {FUNCTIONS_SH}
+            for i in $(seq 40); do
+                _pick_random_line {pool_path}
+            done
+        '''
+        out = _sh(script).strip().splitlines()
+        assert len(out) == 40
+        for got in out:
+            assert got in valid, f"picker returned non-pool line: {got!r}"
+    finally:
+        Path(pool_path).unlink()

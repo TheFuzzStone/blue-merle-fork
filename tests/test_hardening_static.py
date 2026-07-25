@@ -440,3 +440,20 @@ def test_cli_cfun4_retry_loop_is_bounded_and_eof_safe():
     assert "read -r reply ||" in block
 
 
+def test_no_backslash_s_in_shell_files():
+    r"""`\s` is a GNU-ism: in POSIX/musl ERE (OpenWrt busybox grep) it is
+    undefined and busybox treats it as a literal 's'. The pool picker
+    used '^\s*(#|$)', which on-target silently stops excluding
+    whitespace-prefixed comments and whitespace-only lines — a landmine
+    for anyone editing a pool file. POSIX form is [[:space:]], which the
+    rest of the project already uses. Ban `\s` in every shell file;
+    Python regexes (.py, where \s is valid) are out of scope."""
+    offenders = []
+    for base in ("files", "tools"):
+        for path in (ROOT / base).rglob("*"):
+            if not path.is_file() or path.suffix == ".py":
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if "\\s" in text:
+                offenders.append(str(path.relative_to(ROOT)))
+    assert not offenders, f"\\s in shell file(s): {offenders}"

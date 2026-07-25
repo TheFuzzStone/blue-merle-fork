@@ -319,7 +319,10 @@ _pick_random_line () {
     local file=$1
     [ -r "$file" ] || return 1
     local total
-    total=$(grep -cvE '^\s*(#|$)' "$file" 2>/dev/null || echo 0)
+    # POSIX ERE only: [[:space:]] — a backslash-s escape is read as a
+    # literal 's' by busybox/musl grep, which would silently stop
+    # excluding indented comments and whitespace-only lines.
+    total=$(grep -cvE '^[[:space:]]*(#|$)' "$file" 2>/dev/null || echo 0)
     [ "$total" -gt 0 ] || return 1
     local rnd
     rnd=$(_rand16)
@@ -330,7 +333,7 @@ _pick_random_line () {
         ''|*[!0-9]*) rnd=$(( $$ + total )) ;;
     esac
     local idx=$(( rnd % total + 1 ))
-    grep -vE '^\s*(#|$)' "$file" | sed -n "${idx}p"
+    grep -vE '^[[:space:]]*(#|$)' "$file" | sed -n "${idx}p"
 }
 
 # Pick one valid US first name for the masquerade identity and print
