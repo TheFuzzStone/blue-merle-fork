@@ -140,6 +140,9 @@ python3 tests/run_all.py   # all must pass
 - `uci commit` → must match the section (`glconfig`, not `network`).
 - `wifi-iface[1]` → may be disabled. Always `uci -q … || true`.
 - `read` in stage1/2 → no TTY. Use tmpfs files.
+- `read` in the CLI → stdin EOF yields the *default* (proceed) answer.
+  Keep the `[ -t 0 ]` guard first and an `|| … exit 1` handler on every
+  `read` (mid-swap handlers power off via `_safe_poweroff`).
 - `READ_IMEI | sed …` → pipeline status is sed's (always 0). Validate
   the read first (`_is_valid_imei_shape`), mask only on success.
 - LuCI `prepare-sim-swap` has no stage 2 — it must apply the same

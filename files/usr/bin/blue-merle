@@ -3,6 +3,16 @@
 # Interactive CLI for changing the Mudi's IMEI. See also the toggle-driven
 # workflow in /usr/bin/blue-merle-switch-stage{1,2} and the LuCI view.
 
+# Interactive use only: with stdin closed or redirected (ssh ... </dev/null,
+# ansible) every read below hits EOF, and EOF takes the default branch —
+# which is always the *proceed* branch, ending in an unattended IMEI
+# change and poweroff. Refuse before touching anything (same guard as
+# the Makefile preinst).
+[ -t 0 ] || {
+	echo "Interactive use only (stdin is not a terminal)." >&2
+	exit 1
+}
+
 . /lib/blue-merle/functions.sh
 
 _sim_swap_pending && {
@@ -30,7 +40,7 @@ export BLUE_MERLE_TTY
 _resolve_tac_selection
 
 printf 'Swap SIM card and update IMEI? (Y/n): '
-read -r answer
+read -r answer || { echo "No input; aborting." >&2; exit 1; }
 case $answer in
 	n*|N*) answer=0;;
 	*) answer=1;;
@@ -45,13 +55,22 @@ echo "Disabling the ME from both transmitting and receiving RF signals..."
 old_imei=$(READ_IMEI)
 old_imsi=$(READ_IMSI)
 
+# Bounded like stage1's CFUN loop: the modem is still untouched here
+# (CFUN=4 has not succeeded), so a plain abort is safe — and an EOF on
+# the retry prompt must not spin the loop without any sleep.
 answer=1
+cfun4_tries=0
 while [ "$answer" -eq 1 ]; do
 	if gl_modem AT AT+CFUN=4 | grep -q OK; then
 		answer=0
 	else
+		cfun4_tries=$((cfun4_tries+1))
+		if [ "$cfun4_tries" -ge 15 ]; then
+			echo "CFUN=4 failed after $cfun4_tries attempts; aborting." >&2
+			exit 1
+		fi
 		printf '...failed. Try again? (Y/n): '
-		read -r reply
+		read -r reply || { echo "No input; aborting." >&2; exit 1; }
 		case $reply in
 			n*|N*) exit 1 ;;
 		esac
@@ -76,7 +95,9 @@ fi
 
 
 printf 'Please now replace the SIM card and press any key to continue. '
-read -r answer
+# Losing the user mid-swap leaves an uncertain state (CFUN=4, interim
+# IMEI written) — fail closed like every other failure path from here on.
+read -r answer || { echo "No input; aborting mid-swap; powering off." >&2; _safe_poweroff; exit 1; }
 
 leak=0
 max_cfun_retries=30
@@ -127,7 +148,7 @@ elif [ "$old_imsi" = "$new_imsi" ]; then
 fi
 
 printf 'Would you like to set a random (r) or deterministic (d) IMEI? (R/d): '
-read -r answer
+read -r answer || { echo "No input; aborting mid-swap; powering off." >&2; _safe_poweroff; exit 1; }
 case $answer in
 	d*|D*) answer=0;;
 	*) answer=1;;
@@ -170,7 +191,10 @@ echo "You should now reset the modem or shutdown the device."
 echo "For extra privacy, you should shutdown the device and change your location."
 echo
 printf 'Would you like to shutdown the device (s) or reset the modem (m)? (S/m): '
-read -r answer
+# The IMEI change is complete and validated here; a plain exit would
+# strand the modem in CFUN=4 (no service until manual intervention),
+# so EOF completes the workflow instead of aborting it.
+read -r answer || { echo "No input; powering off to finish the IMEI change." >&2; _safe_poweroff; exit 1; }
 case $answer in
 	m*|M*) answer=0;;
 	*) answer=1;;

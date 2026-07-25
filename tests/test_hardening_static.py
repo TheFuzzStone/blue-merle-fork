@@ -401,3 +401,41 @@ def test_noninteractive_imei_generate_calls_discard_stderr():
             assert "2>/dev/null" in line, f"{path}:{lineno}: {line.strip()}"
 
 
+def test_cli_refuses_noninteractive_stdin():
+    """Every `read` in the interactive CLI treats EOF as the default
+    answer — and the default is always the *proceed* branch. With
+    closed stdin (ssh router blue-merle </dev/null, ansible) the whole
+    chain ran unattended and ended in poweroff. A tty guard must come
+    before any prompt (same fix as the Makefile preinst), and every
+    read must carry a non-zero-exit EOF handler for the Ctrl-D /
+    dropped-SSH case."""
+    import re
+
+    src = _read("files/usr/bin/blue-merle")
+    assert "[ -t 0 ]" in src
+    assert src.index("[ -t 0 ]") < src.index("read -r"), (
+        "tty guard must precede the first prompt"
+    )
+    reads = [
+        line for line in src.splitlines()
+        if re.search(r"\bread -r\b", line) and not line.strip().startswith("#")
+    ]
+    assert reads, "expected interactive read prompts in the CLI"
+    for line in reads:
+        assert "||" in line and "exit 1" in line, (
+            f"read without EOF handler: {line.strip()}"
+        )
+
+
+def test_cli_cfun4_retry_loop_is_bounded_and_eof_safe():
+    """The CFUN=4 retry prompt used to spin with no sleep on EOF (read
+    returns empty, empty is not 'n', immediate retry — 100% CPU hammering
+    gl_modem forever). It needs the same bounded escape as stage1
+    (15 tries) plus an EOF exit on the read."""
+    src = _read("files/usr/bin/blue-merle")
+    block = src.split('while [ "$answer" -eq 1 ]', 1)[1].split("done", 1)[0]
+    assert "cfun4_tries=$((cfun4_tries+1))" in block
+    assert '"$cfun4_tries" -ge 15' in block
+    assert "read -r reply ||" in block
+
+
