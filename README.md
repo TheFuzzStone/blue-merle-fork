@@ -10,7 +10,9 @@ Apple-device masquerade, and hardens every IMEI/identity code path.
 
 - **Target:** firmware `4.3.26`, MCU ≥ `1.0.7`
 - **Package:** `blue-merle_3.0.5-local` (opkg name unchanged)
-- **Usage:** [`USAGE.md`](./USAGE.md) (EN) | [`USAGE_RU.md`](./USAGE_RU.md) (RU)
+- **Usage:**
+  -   [`USAGE.md`](./USAGE.md) (EN)
+  -   [`USAGE_RU.md`](./USAGE_RU.md) (RU)
 - **AI agents:** [`AGENTS.md`](./AGENTS.md)
 - **License:** BSD-3-Clause
 
