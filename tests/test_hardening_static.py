@@ -552,7 +552,7 @@ def test_volatile_client_macs_guards_running_gl_clients():
     on a live system — and must restart it on every outcome, so a
     failed take-over never leaves the stock daemon down."""
     src = _read("files/etc/init.d/volatile-client-macs")
-    block = src.split("start() {", 1)[1]
+    block = src.split("start() {", 1)[1].split("stop() {", 1)[0]
     assert "pidof gl_clients" in block
     assert block.index("pidof gl_clients") < block.index("/etc/init.d/gl_clients stop")
     # Stop before the mount, restart after it.
@@ -563,6 +563,24 @@ def test_volatile_client_macs_guards_running_gl_clients():
     assert block.count("/etc/init.d/gl_clients start") == 1
     assert "return $rc" in block
     # The take-over is logged.
+    import re
+    assert re.search(r"logger[^\n]*gl_clients", block), "guard activation must be logged"
+
+
+def test_volatile_client_macs_stop_also_guards_gl_clients():
+    """stop() unmounts /etc/oui-tertf; a manual `service ... stop` on a
+    live system would leave gl_clients holding an fd to the hidden
+    tmpfs inode — and its next start would silently recreate the db on
+    FLASH (undoing the privacy protection). Mirror of the start()
+    guard: stop gl_clients first, restart it after, never leave the
+    stock daemon down."""
+    src = _read("files/etc/init.d/volatile-client-macs")
+    block = src.split("stop() {", 1)[1]
+    umount = 'umount "$CLIENT_DB_DIR"'
+    assert "pidof gl_clients" in block
+    assert block.index("pidof gl_clients") < block.index(umount)
+    assert block.index("/etc/init.d/gl_clients stop") < block.index(umount)
+    assert block.index("/etc/init.d/gl_clients start") > block.index(umount)
     import re
     assert re.search(r"logger[^\n]*gl_clients", block), "guard activation must be logged"
 

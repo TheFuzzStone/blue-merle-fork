@@ -78,11 +78,29 @@ start() {
 }
 
 stop() {
+    # Mirror of the start() guard: gl_clients must not hold the db open
+    # across the umount — it would keep an fd to the hidden tmpfs
+    # inode, and its next start would silently recreate the db on
+    # flash. Stop it first, restart it after (never leave the stock
+    # daemon down). In the package prerm ordering gl_clients is already
+    # stopped here, so this is a no-op there.
+    gl_clients_was_running=""
+    if pidof gl_clients >/dev/null 2>&1; then
+        gl_clients_was_running=1
+        /etc/init.d/gl_clients stop 2>/dev/null || true
+        logger -p notice -t blue-merle "volatile-client-macs: stopped gl_clients before umount of $CLIENT_DB_DIR"
+    fi
+
     # We are being explicitly stopped (uninstall or reload). Truncate
     # the in-RAM db and unmount. `rm` is the right primitive on tmpfs;
     # `shred` is meaningless on RAM-backed filesystems.
     if grep -q " ${CLIENT_DB_DIR} " /proc/mounts; then
         rm -f "$CLIENT_DB"
         umount "$CLIENT_DB_DIR" 2>/dev/null || umount -l "$CLIENT_DB_DIR" 2>/dev/null
+    fi
+
+    if [ -n "$gl_clients_was_running" ]; then
+        /etc/init.d/gl_clients start 2>/dev/null || true
+        logger -p notice -t blue-merle "volatile-client-macs: gl_clients restarted after umount"
     fi
 }
