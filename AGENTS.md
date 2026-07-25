@@ -17,9 +17,18 @@ phone is user-supplied, fail-closed), `stable_identity` UCI option, per-uplink
 MAC rotation, tmpfs for `/root/esim` and `/etc/oui-tertf`, fail-closed state
 machine, shared modem lock.
 
-## Current status (handoff, 2026-07-25 — hardware session, IN PROGRESS)
+## Current status (handoff, 2026-07-25 — hardware session, SIM items pending)
 
-local-28 flashed on the Mudi. Checklist progress: base state ✅ →
+`origin/main @ c3ec9ad` — all three hardware fixes committed and
+pushed. **`dist/blue-merle_3.0.5-local-33_mips_24kc.ipk` is THE build
+to flash** (content-audited: hooks 02/03, grep -ow, Depends includes
+python3-logging/urllib; SHA256SUMS updated; local-28 pruned). Mudi is
+running local-33 — verified on the official package files: version,
+hooks, python deps, read-identifiers `868186******309`, rotation
+(sta uci == runtime == macclone, ~2 s, fresh DHCP lease). Remaining
+checklist items need 2 SIMs → `SIM-SESSION-CHECKLIST.md` (gitignored).
+
+Session checklist record: base state ✅ →
 paired identity at reboot ✅ (all identifiers rotated, WiFi key md5
 unchanged, runtime=UCI) → `stable_identity` ✅ (boot freeze identical;
 hooks no-op under =1) → ifdown uplink rotation ✅ **after fix #2**
@@ -89,13 +98,12 @@ f5e7173` (`034203c` → step series `7bc0560..b9405f4` → docs/cleanup
 `-s sh -S warning` all green; every step-series commit individually
 verified green in a worktree.
 
-Build: `dist/blue-merle_3.0.5-local-28_mips_24kc.ipk` (from `88053ff`,
-content-audited, SHA256SUMS updated) was flashed for this session;
-local-19 predates the session and was pruned. Published as GitHub
-Release `v3.0.5-local` (ipk + SHA256SUMS, 2026-07-25). The package
-builds without `feeds update` (SDK volatile — re-download per README).
-**Rebuild required before next flash**: local-28 lacks both hardware
-fixes above (CRLF + hotplug). Bump the local suffix.
+Build: local-28 (from `88053ff`) was flashed for the session start;
+local-33 (from `c3ec9ad`) superseded it the same day with all three
+fixes. The GitHub Release `v3.0.5-local` still carries local-28 —
+consider re-releasing from local-33 after the SIM session confirms
+the toggle/CLI paths. The package builds without `feeds update`
+(SDK volatile — re-download per README).
 
 ### Session workflow (conventions that proved themselves)
 
