@@ -43,15 +43,15 @@ def test_libexec_resolves_tty_only_after_operation_lock():
 
 def test_hotplug_respects_stable_identity():
     for path in (
-        "files/etc/hotplug.d/iface/30-blue-merle-bssid-on-ifdown",
-        "files/etc/hotplug.d/iface/31-blue-merle-uplink-mac",
+        "files/etc/hotplug.d/iface/02-blue-merle-bssid-on-ifdown",
+        "files/etc/hotplug.d/iface/03-blue-merle-uplink-mac",
     ):
         src = _read(path)
         assert "stable_identity" in src, path
 
 
 def test_uplink_mac_rotates_on_ifdown_synchronously():
-    src = _read("files/etc/hotplug.d/iface/31-blue-merle-uplink-mac")
+    src = _read("files/etc/hotplug.d/iface/03-blue-merle-uplink-mac")
     # Rotation at ifup only staged the MAC for the *next* association
     # and raced it from a backgrounded subshell — a lock-contended or
     # beaten commit left the next uplink with the previous MAC.
@@ -130,6 +130,19 @@ def test_reload_rotates_identity_when_identity_is_not_stable():
     src = _read("files/etc/init.d/blue-merle")
     reload_block = src.split("reload()", 1)[1]
     assert "RANDOMIZE_IDENTITY || return 1" in reload_block
+
+
+def test_makefile_declares_split_python3_modules_used_by_imei_generate():
+    """OpenWrt splits python3 into many packages; python3-light does NOT
+    include `logging`, and `pathlib` pulls in `urllib` (also split).
+    Hardware finding (GL-E750, python3 3.10.9-1): imei_generate.py died
+    with ModuleNotFoundError('logging') on every IMEI-write path —
+    stage1/stage2/CLI/LuCI all broken on a stock install. The ipk must
+    depend on the split packages for every stdlib module the generator
+    imports that python3-light lacks."""
+    mk = _read("Makefile")
+    assert "python3-logging" in mk
+    assert "python3-urllib" in mk
 
 
 def test_boot_and_full_rotation_use_paired_identity():

@@ -16,7 +16,10 @@ define Package/blue-merle
 	# wipes; this fork replaced them with plain rm (shred is theatre
 	# on NAND and pointless on tmpfs). Dropping the dep saves ~50 KB
 	# of flash on the device.
-	EXTRA_DEPENDS:=luci-base, gl-sdk4-mcu, python3-pyserial
+	# python3-logging + python3-urllib are NOT in python3-light;
+	# imei_generate.py imports logging, and pathlib pulls in urllib
+	# (hardware finding: ModuleNotFoundError killed every IMEI path).
+	EXTRA_DEPENDS:=luci-base, gl-sdk4-mcu, python3-pyserial, python3-logging, python3-urllib
 	TITLE:=Anonymity Enhancements for GL-E750 Mudi
 endef
 

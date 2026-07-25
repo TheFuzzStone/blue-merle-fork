@@ -17,19 +17,85 @@ phone is user-supplied, fail-closed), `stable_identity` UCI option, per-uplink
 MAC rotation, tmpfs for `/root/esim` and `/etc/oui-tertf`, fail-closed state
 machine, shared modem lock.
 
-## Current status (handoff, 2026-07-25 — session closed)
+## Current status (handoff, 2026-07-25 — hardware session, IN PROGRESS)
 
-Everything is merged and PUSHED: `origin/main @ f5e7173` (`034203c` →
-step series `7bc0560..b9405f4` → docs/cleanup `88053ff..f5e7173`).
-98 unit tests + CI's `sh -n` set + shellcheck `-s sh -S warning` all
-green; every step-series commit individually verified green in a
-worktree.
+local-28 flashed on the Mudi. Checklist progress: base state ✅ →
+paired identity at reboot ✅ (all identifiers rotated, WiFi key md5
+unchanged, runtime=UCI) → `stable_identity` ✅ (boot freeze identical;
+hooks no-op under =1) → ifdown uplink rotation ✅ **after fix #2**
+(both stores rotated ~2 s, runtime == staged, new DHCP lease) →
+LuCI flow ✅ **after fix #3** (prepare-sim-swap: mask ==
+/root/esim/imei == modem readback == `868186******309`, TAC 868186
+preserved, 0 fifteen-digit lines in logread; TAC RPCs: phone-mode
+fail-closed on empty list, unknown subcommand rc=2). LuCI web page
+itself NOT yet eyeballed by the user.
+Next: toggle flow (needs user + 2 SIMs; THE MCU pagination test) →
+CLI (interactive; needs SIM swap mid-flow) → anti-forensics →
+uninstall.
+Device state: no SIM, uplink = WiFi repeater (wwan/wlan-sta0),
+stable_identity=0, modem IMEI now `868186******309` (changed by the
+LuCI test), CFUN restored to 1.
+
+**THREE hardware finds, all fixed in tree (UNCOMMITTED, device
+hot-patched, next ipk must include them):**
+
+1. `gl_modem` passes CRLF through → `READ_IMEI`/`READ_IMSI` captured a
+   trailing `\r` (len 16); every fail-closed gate misfired (stage2 /
+   prepare-sim-swap would power off after *successful* writes).
+   Fix: `grep -ow` in functions.sh. Tests: `tests/test_read_helpers.py`.
+2. Uplink rotation broken two ways: (a) hook rotated only
+   `glconfig.general.macclone_addr`, but FW 4.3.26's repeater runtime
+   MAC comes from `wireless.sta.macaddr` (netifd applies it per-ifup;
+   GL's `repeater` binary re-reads macclone_addr only at boot-restore /
+   network change) — per-ifdown rotations never reached the air;
+   (b) hooks numbered 30/31 ran AFTER 15/16-mwan3 + 20-firewall in the
+   shared hotplug queue → commit landed ~28 s after ifdown, past the
+   follow-up ifup (netifd doesn't wait). Fix: hooks renamed to
+   `02-/03-`, and `03-blue-merle-uplink-mac` also rotates
+   `wireless.sta.macaddr` (same NEW_MAC) when a sta config exists.
+   Tests: `tests/test_hotplug_uplink.py` (functional with stub uci).
+   Verified on hardware: rotation commits ~2 s after ifdown, runtime
+   MAC == staged value, upstream hands out a fresh DHCP lease.
+3. `imei_generate.py` could not run AT ALL: `ModuleNotFoundError:
+   logging` — OpenWrt's python3-light lacks `logging`, and `pathlib`
+   pulls `urllib` (also split). EXTRA_DEPENDS had only python3-pyserial
+   → every IMEI-write path died on a stock install. Fix: Makefile
+   EXTRA_DEPENDS += `python3-logging, python3-urllib`. Test:
+   `test_makefile_declares_split_python3_modules_used_by_imei_generate`.
+   On device: both packages installed via `opkg update && opkg install`.
+
+107 tests + `sh -n` green. Device hot-patch state: functions.sh
+(grep -ow), hotplug hooks (renamed + sta rotation), python3-logging +
+python3-urllib installed.
+
+Minor findings (no fix yet):
+- Boot-time `logger` lines from init.d S10 never reach logread
+  (logd starts at S12log) — e.g. the stable_identity notice is lost.
+- `/etc/mcuversion` absent on FW 4.3.26 → postinst prints "Could not
+  detect MCU version"; MCU pagination still unverified.
+- Guest SSIDs keep factory `GL-E750-a19-Guest` (both disabled).
+- ifup after manual ifdown takes ~20-30 s (netifd retry cycle: "link
+  connectivity loss" → recover) — platform behaviour, not ours.
+
+Everything before this session is merged and PUSHED: `origin/main @
+f5e7173` (`034203c` → step series `7bc0560..b9405f4` → docs/cleanup
+`88053ff..f5e7173`). 98 unit tests + CI's `sh -n` set + shellcheck
+`-s sh -S warning` all green; every step-series commit individually
+verified green in a worktree.
+
+Everything before this session is merged and PUSHED: `origin/main @
+f5e7173` (`034203c` → step series `7bc0560..b9405f4` → docs/cleanup
+`88053ff..f5e7173`). 98 unit tests + CI's `sh -n` set + shellcheck
+`-s sh -S warning` all green; every step-series commit individually
+verified green in a worktree.
 
 Build: `dist/blue-merle_3.0.5-local-28_mips_24kc.ipk` (from `88053ff`,
-content-audited, SHA256SUMS updated) is the ONLY build to flash;
+content-audited, SHA256SUMS updated) was flashed for this session;
 local-19 predates the session and was pruned. Published as GitHub
 Release `v3.0.5-local` (ipk + SHA256SUMS, 2026-07-25). The package
 builds without `feeds update` (SDK volatile — re-download per README).
+**Rebuild required before next flash**: local-28 lacks both hardware
+fixes above (CRLF + hotplug). Bump the local suffix.
 
 ### Session workflow (conventions that proved themselves)
 
@@ -45,13 +111,11 @@ builds without `feeds update` (SDK volatile — re-download per README).
 
 ### Queue (priority order)
 
-1. **Hardware testing on the Mudi** (needs the device; user holds the
-   checklist: base state → paired identity → `stable_identity` →
-   ifdown uplink rotation → LuCI (incl. `/root/esim/imei` matching the
-   masked value BEFORE shutdown) → toggle flow → CLI → anti-forensics →
-   uninstall). Main unverified assumption: MCU display pagination.
-   Follow-up: after a real toggle swap, confirm `logread` has no IMEI;
-   note where gl_switch child stderr lands. Flash ONLY local-28.
+1. **Hardware testing on the Mudi** — remaining items all need 2 SIM
+   cards (user will buy): toggle flow (= the MCU pagination test) →
+   CLI → anti-forensics → uninstall. The full step-by-step lives in
+   `SIM-SESSION-CHECKLIST.md` (gitignored, on the user's machine).
+   Everything automatable was done 2026-07-25 (see Current status).
 2. **TAC proposals — awaiting user decision:** (a) document obtaining
    provenance TACs + `original_tac` override; (b) LuCI read-only TAC
    status (mode + baseline present/absent — never the value, it reveals
@@ -163,6 +227,17 @@ python3 tests/run_all.py   # all must pass
   `read` (mid-swap handlers power off via `_safe_poweroff`).
 - `READ_IMEI | sed …` → pipeline status is sed's (always 0). Validate
   the read first (`_is_valid_imei_shape`), mask only on success.
+- `gl_modem` passes CRLF through → captured values carry a trailing
+  `\r`. Always extract with `grep -ow`, never `grep -w` on a line.
+  (Killed every IMEI flow on real hardware; unit tests with stubs
+  that emit `\n`-only will NOT catch this — stubs must use CRLF.)
+- `/etc/hotplug.d/iface/` runs alphabetically and netifd does NOT wait;
+  GL's 15/16-mwan3 + 20-firewall take ~28 s on the Mudi. Anything
+  numbered after them commits long past the follow-up ifup.
+- Repeater runtime MAC comes from `wireless.sta.macaddr` (applied by
+  netifd per ifup), NOT from `glconfig.general.macclone_addr` (read by
+  the GL `repeater` binary only at boot-restore / network change).
+  Rotating macclone_addr alone never reaches the air interface.
 - LuCI `prepare-sim-swap` has no stage 2 — it must apply the same
   fail-closed invariants as stage2 (`_write_runtime_imei`, poweroff).
 - TAC UI/comments must not claim `86xx`=module / `35xx`=phone; prefixes

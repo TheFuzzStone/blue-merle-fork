@@ -14,7 +14,15 @@
 #   * Rotating at ifdown stages the fresh value while no association is
 #     active, synchronously, so the follow-up ifup can never read a
 #     stale committed value. One uci commit per leave/join cycle.
-#   * Same pattern as 30-blue-merle-bssid-on-ifdown.
+#   * Same pattern as 02-blue-merle-bssid-on-ifdown.
+#
+# Filename matters (hardware-verified on FW 4.3.26): netifd does NOT
+# wait for /etc/hotplug.d/iface/ scripts, and the alphabetical queue is
+# shared — GL's 15/16-mwan3, 20-firewall and 21-vpnpolicy take tens of
+# seconds on the Mudi. As 31-*, this hook's commit landed ~28 s after
+# the ifdown, long past the follow-up ifup. As 03-* it runs right
+# behind 00-netstate and 01-mtk-acceleration (both fast), so the fresh
+# value is committed before the next association is realistically up.
 #
 # Trade-off: a transient drop of the *same* uplink also rotates the
 # MAC, so captive-portal networks may ask for re-authorisation. Set
@@ -39,11 +47,11 @@ esac
 # Serialize with any other blue-merle write to glconfig.
 LOCK=/tmp/blue-merle-uplink-mac.lock
 
-# Run synchronously (see 30-blue-merle-bssid-on-ifdown for the full
+# Run synchronously (see 02-blue-merle-bssid-on-ifdown for the full
 # argument): the rotation must be committed before netifd processes the
 # matching ifup, or the off-by-one this hook exists to fix comes back.
-# netifd serialises per-interface hotplug scripts, so the sub-second
-# APPLE_MAC_GEN + uci commit blocks nothing outside the uplink path.
+# The scripts in the hotplug queue run serially, so the sub-second
+# APPLE_MAC_GEN + uci commit delays only the (fast) scripts behind us.
 (
     flock -n 9 || exit 0
     . /lib/blue-merle/functions.sh
@@ -58,6 +66,19 @@ LOCK=/tmp/blue-merle-uplink-mac.lock
     [ -n "$NEW_MAC" ] || exit 0
     uci set glconfig.general.macclone_addr="$NEW_MAC" || exit 1
     uci commit glconfig || exit 1
+
+    # The repeater's runtime MAC does NOT come from macclone_addr on
+    # FW 4.3.26: netifd applies wireless.sta.macaddr at every ifup,
+    # while the GL repeater binary only re-reads macclone_addr when it
+    # re-creates the sta config (boot restore / network change). A
+    # rotation that stops at macclone_addr therefore never reaches the
+    # air interface (hardware-verified). Keep both stores equal, like
+    # the boot flow does; skip silently when no repeater is configured.
+    if uci -q get wireless.sta.macaddr >/dev/null 2>&1; then
+        uci set wireless.sta.macaddr="$NEW_MAC" || exit 1
+        uci commit wireless || exit 1
+    fi
+
     logger -p notice -t blue-merle \
-        "Rotated upstream macclone_addr after ifdown of $INTERFACE — next uplink will use it"
+        "Rotated upstream MAC after ifdown of $INTERFACE — next uplink will use it"
 ) 9>"$LOCK"

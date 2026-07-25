@@ -88,7 +88,7 @@ Env overrides: `BLUE_MERLE_TTY`, `BLUE_MERLE_FORCE=1`, `BM_READ_TRIES`,
 service blue-merle disable
 service blue-merle-esim-tmpfs disable
 service volatile-client-macs disable
-chmod -x /etc/hotplug.d/iface/3?-blue-merle-*   # both hotplug hooks
+chmod -x /etc/hotplug.d/iface/0?-blue-merle-*   # both hotplug hooks
 ```
 
 ## Diagnostics

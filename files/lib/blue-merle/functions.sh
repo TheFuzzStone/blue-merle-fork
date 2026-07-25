@@ -447,8 +447,11 @@ READ_IMEI () {
 	local imei=""
 	while [ "$tries" -lt "$max" ]; do
 		# grep may match multiple candidates in a chatty AT response;
-		# take only the first for safety.
-		imei=$(gl_modem AT AT+GSN | grep -w -E "[0-9]{14,15}" | head -n1)
+		# take only the first for safety. -o prints only the matched
+		# digits: gl_modem passes the modem's CRLF through, and a
+		# captured trailing \r fails _is_valid_imei_shape downstream
+		# (hardware finding, FW 4.3.26 — every readback failed closed).
+		imei=$(gl_modem AT AT+GSN | grep -ow -E "[0-9]{14,15}" | head -n1)
 		if [ -n "$imei" ]; then
 			printf '%s' "$imei"
 			return 0
@@ -464,7 +467,7 @@ READ_IMSI () {
 	local max=${BM_READ_TRIES:-5}
 	local imsi=""
 	while [ "$tries" -lt "$max" ]; do
-		imsi=$(gl_modem AT AT+CIMI | grep -w -E "[0-9]{6,15}" | head -n1)
+		imsi=$(gl_modem AT AT+CIMI | grep -ow -E "[0-9]{6,15}" | head -n1)
 		if [ -n "$imsi" ]; then
 			printf '%s' "$imsi"
 			return 0
