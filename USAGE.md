@@ -12,9 +12,8 @@ Download from [Releases](../../releases), then:
 ```sh
 scp -O blue-merle_*.ipk root@192.168.8.1:/tmp/
 ssh root@192.168.8.1 'opkg install --force-reinstall /tmp/blue-merle_*.ipk && reboot'
+# after reboot: new SSID (e.g. Emma's iPhone), same WiFi password
 ```
-
-After reboot: new SSID (e.g. `Emma's iPhone`), same WiFi password.
 
 | Changes at reboot? | Identifier | When it changes |
 |:---:|---|---|
@@ -36,6 +35,7 @@ After reboot: new SSID (e.g. `Emma's iPhone`), same WiFi password.
 ```sh
 ssh root@192.168.8.1
 blue-merle    # → y → swap SIM → r → s (shutdown, change location)
+# interactive only: aborts when stdin is not a terminal
 ```
 
 ### Toggle
@@ -47,8 +47,8 @@ blue-merle    # → y → swap SIM → r → s (shutdown, change location)
 
 ### LuCI
 
-`http://192.168.8.1` → Blue Merle → `SIM swap…`. Must shut down and
-swap SIM before powering back on.
+`http://192.168.8.1` → Blue Merle → `SIM swap…`. Shut down and swap
+the SIM before powering back on.
 
 ## Rotate MAC / SSID (no reboot)
 
@@ -57,6 +57,8 @@ blue-merle-newmac --full          # all MACs + paired hostname/SSID identity
 blue-merle-newmac --uplink        # only upstream MAC (AP clients stay)
 blue-merle-newmac --pure-random   # RFC-7844 MAC instead of Apple OUI
 blue-merle-newssid                # SSID + synced hostname
+# --full with --uplink: upstream MAC + identity only (BSSIDs stay,
+# but the SSID change still kicks AP clients)
 ```
 
 ## Configuration
@@ -66,24 +68,19 @@ uci set blue-merle.main.stable_identity=1 && uci commit blue-merle   # freeze id
 uci set blue-merle.main.tac_mode=phone && uci commit blue-merle     # or 'module'
 ```
 
-**TAC policy:**
+`module` (default) preserves the baseline modem TAC captured at install
+(no external database). `phone` uses your `tac-list-phone.txt` and fails
+closed until you add TACs with documented GSMA provenance.
 
-| Mode | Source | Notes |
-|---|---|---|
-| module (default) | Baseline TAC from modem at install | No external database. |
-| phone | `tac-list-phone.txt` (user-supplied) | Fails closed until you add verified TACs with GSMA provenance. |
-
-**Edit pools:**
+Pools — one entry per line, `#` = comment; `service blue-merle reload`
+applies without reboot:
 
 ```sh
 vi /lib/blue-merle/{apple-oui,us-first-names,tac-list,tac-list-phone}.txt
+# OUI: lowercase aa:bb:cc. Names: ASCII letters only. TAC: 8 digits.
 ```
 
-One entry per line, `#` = comment.
-OUI: lowercase `aa:bb:cc`. Names: ASCII letters only. TAC: 8 digits.
-`service blue-merle reload` applies without reboot.
-
-**Env overrides:** `BLUE_MERLE_TTY`, `BLUE_MERLE_FORCE=1`, `BM_READ_TRIES`,
+Env overrides: `BLUE_MERLE_TTY`, `BLUE_MERLE_FORCE=1`, `BM_READ_TRIES`,
 `BLUE_MERLE_TAC`, `BLUE_MERLE_TAC_LIST`, `BLUE_MERLE_APPLE_OUI`,
 `BLUE_MERLE_US_NAMES`.
 
@@ -93,18 +90,16 @@ OUI: lowercase `aa:bb:cc`. Names: ASCII letters only. TAC: 8 digits.
 service blue-merle disable
 service blue-merle-esim-tmpfs disable
 service volatile-client-macs disable
-chmod -x /etc/hotplug.d/iface/30-blue-merle-bssid-on-ifdown
-chmod -x /etc/hotplug.d/iface/31-blue-merle-uplink-mac
+chmod -x /etc/hotplug.d/iface/3?-blue-merle-*   # both hotplug hooks
 ```
 
 ## Diagnostics
 
 ```sh
-logread | grep blue-merle                           # events only, no values
-sh /tmp/blue-merle-diag.sh                          # redacted report
+logread | grep blue-merle   # events only, never identifier values
+sh /tmp/blue-merle-diag.sh  # redacted report
+# harmless AT ERRORs to ignore: AT+QCFG="nwscanseq", AT+QSIMDET
 ```
-
-Known harmless AT ERRORs: `AT+QCFG="nwscanseq"`, `AT+QSIMDET` — ignore.
 
 ## Uninstall
 
@@ -122,18 +117,12 @@ for k in wireless.@wifi-iface[0].macaddr wireless.@wifi-iface[1].macaddr \
 uci commit && reboot
 ```
 
-## Cheat sheet
+## Cheat sheet (the less-obvious commands)
 
 ```sh
-blue-merle                                # interactive IMEI change
-blue-merle-newmac --full                  # rotate everything
-blue-merle-newmac --uplink                # only upstream MAC
-blue-merle-newssid                        # SSID + synced hostname
 /usr/libexec/blue-merle read-identifiers  # masked IMEI+IMSI (JSON)
 /usr/libexec/blue-merle prepare-sim-swap  # atomic RF-off + interim IMEI
-/usr/libexec/blue-merle shutdown           # power off via MCU
+/usr/libexec/blue-merle shutdown          # power off via MCU
 python3 /lib/blue-merle/imei_generate.py --static <15-digit-IMEI>
-service blue-merle {start,stop,reload,enable,disable}
-logread | grep blue-merle
-mount | grep -E 'esim|oui-tertf'
+mount | grep -E 'esim|oui-tertf'          # tmpfs mounts active?
 ```

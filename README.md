@@ -5,9 +5,8 @@
 > or endorse any use. You alone are responsible for your actions.
 
 Fork of [srlabs/blue-merle](https://github.com/srlabs/blue-merle) for the
-**GL-E750 Mudi** 4G travel router. Fixes upstream bugs, adds an Apple-device
-masquerade, hardens the IMEI-change state machine, and ships a regression
-test suite.
+**GL-E750 Mudi** 4G travel router. Fixes upstream bugs, adds an
+Apple-device masquerade, and hardens every IMEI/identity code path.
 
 - **Target:** firmware `4.3.26`, MCU ≥ `1.0.7`
 - **Package:** `blue-merle_3.0.5-local` (opkg name unchanged)
@@ -17,7 +16,7 @@ test suite.
 
 ## Install
 
-Download from [Releases](../../releases), verify checksum, then:
+Download from [Releases](../../releases), verify the checksum, then:
 
 ```sh
 scp -O blue-merle_3.0.5-local-*.ipk root@192.168.8.1:/tmp/
@@ -29,48 +28,43 @@ Reconnect with the **same password** — it never rotates.
 
 ## What changed vs. upstream
 
-### Privacy leaks fixed
+### Privacy
 
-- IMEI values removed from syslog (upstream logged old→new on every rotation)
-- `/root/esim` tmpfs — IMEI lives in RAM only, flash originals wiped
-- MAC generator sets U/L bit (was impersonating real vendors 50% of the time)
-- `shred` → `rm` (theatrical on NAND); `coreutils-shred` dependency dropped
-- IMEI/IMSI masked on MCU and in LuCI RPC (masked-only, no full-value reveal)
-- Diagnostic report no longer emits raw `iwinfo`/`iw`/log identifiers
+- No full IMEI/IMSI anywhere: masked in syslog, MCU, LuCI RPC and the
+  generator's stderr (which is also dropped at non-interactive call
+  sites); one canonical masked form per identifier class, fail-closed
+- `/root/esim` + `/etc/oui-tertf` on tmpfs — IMEI and the client-MAC
+  database live in RAM only, wiped on poweroff
+- MAC generator always sets the U/L bit; `shred` → `rm` (theatrical on
+  NAND, pointless on tmpfs)
 
-### Correctness bugs fixed
+### Correctness
 
-- `AT+QPOWD` → `AT+CFUN=1,1` (was powering modem off, then waiting forever)
-- Lua `luhn_digit` returned 10 instead of 0 (dead Lua path since removed)
-- `random.sample` → `random.choices` (was a statistical fingerprint)
-- `_rand16` uses `/proc/sys/kernel/random/uuid` (busybox has no `od`)
-- One shared modem lock across CLI/toggle/LuCI (was three separate locks)
-- `_resolve_modem_tty` probes AT on each candidate (was checking existence only)
-- stage1 persists real IMEI/IMSI to tmpfs for stage2 (was always empty)
-- All retry loops bounded; fail-closed: errors → safe poweroff, not continue
-- `postrm` commits UCI; `prerm` stops services and unmounts tmpfs
-- IMSI regex accepts 14–15 digits (ITU-T E.212)
-- Serial reads loop until OK/ERROR (was single 64-byte read)
-- `flock -E 99` → portable fd-based lock (no util-linux dependency)
+- Modem control: `AT+CFUN=1,1` reset (was `AT+QPOWD` poweroff), serial
+  reads loop until OK/ERROR, IMSI regex 14–15 digits (ITU-T E.212)
+- Entropy: `random.choices` (no sampling fingerprint), `_rand16` from
+  `/proc/sys/kernel/random/uuid` (busybox has no `od`)
+- One shared flock across CLI/toggle/LuCI; modem TTY probed via AT
+- Fail-closed everywhere: bounded retry loops, errors → safe poweroff;
+  stage1 persists originals for stage2; tmpfs mounts stop gl_clients first
+- CLI refuses non-interactive stdin — a closed stdin used to answer
+  "yes" to every prompt and end in an unattended poweroff
+- Install/uninstall lifecycle: `postrm` commits UCI, `prerm` stops
+  services and unmounts tmpfs; dead Lua Luhn path removed
 
-### Anonymity features
+### Anonymity
 
-- Apple OUI MAC pool (30 prefixes) — vendor lookup matches iPhone hostname
-- Paired iPhone identity: one picked name → SSID `<Name>'s iPhone` +
-  hostname `<Name>s-iPhone` (244 names) — replaces `GL-E750-<serial>`
-  and `Mudi-<serial>`; the two corroborate like a real iPhone
-- TAC policy: module mode preserves baseline modem TAC; phone mode is
-  user-supplied and fail-closed (no guessed GSMA data shipped)
-- Ethernet MAC + hostname + per-uplink MAC rotation
-- `blue-merle-newmac`/`newssid` CLIs (`--uplink`, `--full`, `--dry-run`, `--pure-random`)
-- Hotplug BSSID + upstream MAC rotation on `ifdown`; both respect `stable_identity`
-- `stable_identity` UCI flag — freeze all identifiers across reboots
-- tmpfs started and verified immediately at install (no flash-leak window)
-- Fresh client-MAC database on each boot (no historical import)
+- Apple OUI pool (30 prefixes) + paired identity: one picked name →
+  SSID `<Name>'s iPhone`, hostname `<Name>s-iPhone` (244 names)
+- TAC policy: module mode preserves the baseline modem TAC; phone mode
+  is user-supplied, fail-closed (no guessed GSMA data shipped)
+- Per-uplink MAC rotation on `ifdown`; hotplug BSSID rotation;
+  `stable_identity` flag freezes all identifiers across reboots
+- `blue-merle-newmac` / `blue-merle-newssid` CLIs
 
-### Tests
+## Tests
 
-75 unit tests including 24 static privacy-invariant regressions.
+97 unit tests (static privacy invariants + functional regressions):
 
 ```sh
 python3 tests/run_all.py
@@ -78,38 +72,35 @@ python3 tests/run_all.py
 
 ## Threat-model tradeoff
 
-Rotating hostname/BSSID/SSID at every boot defeats cross-location correlation.
-A real iPhone keeps these stable — an observer seeing an "iPhone" that
-changes name every reboot may flag it as anomalous.
-
-Default is unlinkability. To freeze identity:
+Rotating hostname/BSSID/SSID every boot defeats cross-location
+correlation; a real iPhone keeps them stable, so an observer may flag
+an "iPhone" that changes its name every reboot as anomalous. Default
+is unlinkability. To freeze identity:
 
 ```sh
-uci set blue-merle.main.stable_identity=1
-uci commit blue-merle
+uci set blue-merle.main.stable_identity=1 && uci commit blue-merle
 ```
 
 ## Limitations
 
-- **DHCP fingerprinting** — Linux DHCP client, not iOS. Observer can
-  distinguish "iPhone hostname on Linux stack".
-- **TLS fingerprinting** — traffic carries the client's ClientHello, not
-  Mudi's.
+- **DHCP fingerprinting** — Linux DHCP client, not iOS.
+- **TLS fingerprinting** — traffic carries the client's ClientHello.
 - **Traffic analysis** — volume/timing/destinations visible to ISP.
-- **Physical seizure** — RAM (tmpfs) recoverable via cold-boot; flash via
-  chip-off. Physical destruction is the only reliable countermeasure.
-- **Flash history** — UCI commits may leave stale SSID/MAC/hostname in
-  NAND erase blocks. Volatile UCI overlay not enabled (risks breaking
-  GL.iNet netifd without hardware testing).
+- **Physical seizure** — RAM recoverable via cold-boot, flash via
+  chip-off; physical destruction is the only countermeasure.
+- **Flash history** — UCI commits may leave stale values in NAND erase
+  blocks (volatile UCI overlay not enabled).
 
 ## Build from source
 
+No feeds update needed — the package is plain files:
+
 ```sh
-cd "$OPENWRT_SDK"
-ln -s "$PWD/../blue-merle-fork" package/blue-merle
-./scripts/feeds update -a && ./scripts/feeds install -a
-echo "CONFIG_PACKAGE_blue-merle=m" > .config
-echo "CONFIG_SIGNED_PACKAGES=n" >> .config
+cd "$OPENWRT_SDK"   # OpenWrt 23.05, ath79/nand
+mkdir -p package/blue-merle
+ln -s "$PWD/../blue-merle-fork"/{Makefile,files} package/blue-merle/
+echo "CONFIG_SIGNED_PACKAGES=n" > .config
 make defconfig
-make -j$(nproc) package/blue-merle/compile V=s
+make -j"$(nproc)" package/blue-merle/compile V=s
+# ipk: bin/packages/mips_24kc/base/
 ```
