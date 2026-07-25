@@ -1,6 +1,9 @@
 # AGENTS.md
 
-Guidance for AI agents working on this repository.
+Guidance for AI agents working on this repository. This is the single
+project memory: rules, platform constraints, pitfalls, current status
+and the work queue. Read it first; update the status section at the
+end of every session.
 
 ## Project
 
@@ -14,52 +17,69 @@ phone is user-supplied, fail-closed), `stable_identity` UCI option, per-uplink
 MAC rotation, tmpfs for `/root/esim` and `/etc/oui-tertf`, fail-closed state
 machine, shared modem lock.
 
-## Current status (session handoff, 2026-07-25)
+## Current status (handoff, 2026-07-25 — session closed)
 
-Remove this section once stale.
+Everything is merged and PUSHED: `origin/main @ 88053ff` (`034203c` →
+step series `7bc0560..b9405f4` → docs refresh `88053ff`). 97 unit
+tests + CI's `sh -n` set + shellcheck `-s sh -S warning` all green;
+every step-series commit individually verified green in a worktree.
 
-Base is `origin/main @ 034203c` (previous hardening session, pushed).
-On top, this session's TODO.md step series landed UNPUSHED as 8 local
-commits, each verified green in a detached worktree
-(`python3 tests/run_all.py` + CI's `sh -n` set):
+Build: `dist/blue-merle_3.0.5-local-28_mips_24kc.ipk` (from `88053ff`,
+content-audited, SHA256SUMS updated) is the ONLY build to flash;
+local-19 predates the session. The package builds
+without `feeds update` (SDK volatile — re-download per README).
 
-- `7bc0560` — docs: the 2026-07-18 handoff (this section's old form).
-- `c41c56b` — step 1: `imei_generate.py` no longer leaks full
-  IMEI/IMSI to stderr (`_mask_id`/`_scrub_at_output` on all 12 log
-  sites; the three non-interactive call sites also drop stderr).
-- `bcf7cde` — step 2: CLI refuses non-interactive stdin (`[ -t 0 ]`),
-  every `read` has an EOF handler, CFUN=4 loop bounded to 15.
-- `3553010` — step 3: canonical mask forms (IMEI first6+last3, IMSI
-  first5+last4) centralized in `_mask_imei`/`_mask_imsi`; libexec,
-  diag, AGENTS.md aligned.
-- `4782da6` — step 4: `_pick_random_line` uses POSIX `[[:space:]]`.
-- `3c59fe6` — step 5: `volatile-client-macs start()` stops/restarts a
-  running gl_clients around the tmpfs mount.
-- `d127a81` — step 6 batch: stage2/sim.sh switch-marker cleanup,
-  newmac `--uplink --full` help, MCU JSON SSID sanitizing, shellcheck
-  tarball SHA256 pin, CI no longer runs `feeds update`.
-- step 7 (this commit) — repo hygiene: real-ESSID diag log deleted,
-  stale pre-fix ipk pruned from dist/, TODO.md committed.
+### Session workflow (conventions that proved themselves)
 
-97 unit tests; shellcheck clean at `-s sh -S warning` (verified
-locally with the pinned 0.10.0 tarball). Build state:
-`dist/blue-merle_3.0.5-local-19_mips_24kc.ipk` + `SHA256SUMS`,
-content-audited. The package builds without `feeds update` (SDK
-volatile — re-download per README); **the ipk predates this session's
-changes — rebuild before flashing**.
+- Work ONE queue item per session unless the user says otherwise.
+- Every fix gets a regression test verified to FAIL on pre-fix code
+  before the fix is applied; every commit stays green.
+- Green session = `python3 tests/run_all.py` passes + `sh -n` passes
+  on all shell files (CI does both).
+- Never commit/push without an explicit user request; record hashes in
+  the session log when landing.
+- Steelman reviewer proposals before dismissing; admit errors
+  explicitly ("I was wrong because X").
 
-Step-sized work items live in `TODO.md` (committed; steps 1-7 done,
-its "Later" queue is the live queue). The strategic queue is
-unchanged:
+### Queue (priority order)
 
-1. **Hardware testing on the Mudi** (user holds the full checklist;
-   MCU display behaviour is the main unverified assumption).
-2. **TAC proposals awaiting user decision** (see TODO.md "Later").
-3. Strategic: DHCP fingerprinting (udhcpc PRL/options vs iOS).
+1. **Hardware testing on the Mudi** (needs the device; user holds the
+   checklist: base state → paired identity → `stable_identity` →
+   ifdown uplink rotation → LuCI (incl. `/root/esim/imei` matching the
+   masked value BEFORE shutdown) → toggle flow → CLI → anti-forensics →
+   uninstall). Main unverified assumption: MCU display pagination.
+   Follow-up: after a real toggle swap, confirm `logread` has no IMEI;
+   note where gl_switch child stderr lands. Flash ONLY local-28.
+2. **TAC proposals — awaiting user decision:** (a) document obtaining
+   provenance TACs + `original_tac` override; (b) LuCI read-only TAC
+   status (mode + baseline present/absent — never the value, it reveals
+   8/15 IMEI digits); (c) log line when postinst baseline capture
+   fails; (d) optional `blue-merle-tac info` CLI.
+3. **DHCP fingerprinting** (udhcpc PRL/options vs iOS) — research +
+   hardware.
+4. Housekeeping: GitHub Release with the local-28 ipk + EN release
+   note (drafted 2026-07-25); decide fate of `dist/local-19`; delete
+   local branches `hardening-p0`, `p0-libexec-hardening`, `tac-filter`;
+   optional symmetric gl_clients guard in `volatile-client-macs stop()`;
+   confirm CI green on the pushed commits.
 
-Working agreements that proved themselves: every new regression test
-must be verified to fail on the pre-fix code; every commit stays
-green; steelman before dismissing.
+### Session log 2026-07-25 (steps 1-7)
+
+- `c41c56b` — `imei_generate.py` logs masked only (`_mask_id`,
+  `_scrub_at_output`); stage1/stage2/libexec drop stderr too.
+- `bcf7cde` — CLI: `[ -t 0 ]` guard, EOF handler on every `read`
+  (mid-swap → `_safe_poweroff`), CFUN=4 loop bounded to 15.
+- `3553010` — canonical masks (IMEI first6+last3, IMSI first5+last4)
+  in fail-closed `_mask_imei`/`_mask_imsi`; libexec/diag/docs aligned.
+- `4782da6` — `_pick_random_line` uses POSIX `[[:space:]]`; `\s`
+  banned in shell files by a static test.
+- `3c59fe6` — `volatile-client-macs start()` stops/restarts a running
+  gl_clients around the tmpfs mount.
+- `d127a81` — batch: stage2/sim.sh switch-marker cleanup, newmac
+  `--uplink --full` help, MCU JSON SSID sanitizing, shellcheck SHA256
+  pin, CI no longer runs `feeds update`.
+- `b9405f4` — repo hygiene (real-ESSID diag log deleted, stale ipk
+  pruned); `88053ff` — README/USAGE refreshed and compressed.
 
 ## Rules
 

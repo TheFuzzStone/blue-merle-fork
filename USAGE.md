@@ -1,7 +1,5 @@
 # blue-merle-fork — user guide
 
-> Русская версия: [`USAGE_RU.md`](./USAGE_RU.md)
-
 **Golden rule:** CLI is safest. Toggle is fastest without a laptop. LuCI
 is simplest but has weaker IMSI-leak protection.
 
