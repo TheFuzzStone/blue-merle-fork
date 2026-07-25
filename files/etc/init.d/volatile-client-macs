@@ -13,6 +13,10 @@
 #   * We should run early enough that no service has opened the db yet
 #     (that is why the package's preinst also stops gl_clients before we
 #     take over on first install).
+#   * start() additionally stops gl_clients itself if it is already
+#     running (a manual `service volatile-client-macs start` on a live
+#     system) and restarts it after the mount — an fd held to the
+#     hidden flash inode would corrupt the db.
 
 # shellcheck disable=SC2034 # START/STOP are consumed by /etc/rc.common
 START=9
@@ -30,6 +34,17 @@ start() {
         return 0
     fi
 
+    # gl_clients must not hold the db open while we replace the
+    # directory: it would keep an fd to the hidden flash inode and
+    # corrupt the db (SQLite journal on tmpfs, main db on flash).
+    # Mirror the package preinst: stop it first, restart it after.
+    gl_clients_was_running=""
+    if pidof gl_clients >/dev/null 2>&1; then
+        gl_clients_was_running=1
+        /etc/init.d/gl_clients stop 2>/dev/null || true
+        logger -p notice -t blue-merle "volatile-client-macs: stopped gl_clients to take over $CLIENT_DB_DIR"
+    fi
+
     mkdir -p "$CLIENT_DB_DIR"
 
     # Do NOT import the historical flash database into RAM. Its content
@@ -43,14 +58,23 @@ start() {
         rm -f "$CLIENT_DB"
     fi
 
+    rc=0
     if ! mount -t tmpfs -o mode=0755,size=1M tmpfs "$CLIENT_DB_DIR"; then
         logger -p err -t blue-merle "Failed to mount tmpfs on $CLIENT_DB_DIR"
-        return 1
-    fi
-    awk -v p="$CLIENT_DB_DIR" '$2 == p && $3 == "tmpfs" { found=1 } END { exit !found }' /proc/mounts || {
+        rc=1
+    elif ! awk -v p="$CLIENT_DB_DIR" '$2 == p && $3 == "tmpfs" { found=1 } END { exit !found }' /proc/mounts; then
         logger -p err -t blue-merle "$CLIENT_DB_DIR is not backed by tmpfs after mount"
-        return 1
-    }
+        rc=1
+    fi
+
+    # Restart gl_clients on every outcome: a failed take-over must not
+    # leave the stock client-tracking daemon down.
+    if [ -n "$gl_clients_was_running" ]; then
+        /etc/init.d/gl_clients start 2>/dev/null || true
+        logger -p notice -t blue-merle "volatile-client-macs: gl_clients restarted (mount rc=$rc)"
+    fi
+
+    return $rc
 }
 
 stop() {

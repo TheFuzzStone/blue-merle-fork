@@ -440,6 +440,30 @@ def test_cli_cfun4_retry_loop_is_bounded_and_eof_safe():
     assert "read -r reply ||" in block
 
 
+def test_volatile_client_macs_guards_running_gl_clients():
+    """Mounting tmpfs over /etc/oui-tertf while gl_clients has the
+    SQLite db open corrupts the db (gl_clients keeps an fd to the
+    hidden flash inode while its journal would land on tmpfs). The
+    Makefile preinst stops gl_clients first; the init script itself
+    must do the same for a manual `service volatile-client-macs start`
+    on a live system — and must restart it on every outcome, so a
+    failed take-over never leaves the stock daemon down."""
+    src = _read("files/etc/init.d/volatile-client-macs")
+    block = src.split("start() {", 1)[1]
+    assert "pidof gl_clients" in block
+    assert block.index("pidof gl_clients") < block.index("/etc/init.d/gl_clients stop")
+    # Stop before the mount, restart after it.
+    assert block.index("/etc/init.d/gl_clients stop") < block.index("mount -t tmpfs")
+    assert block.index("/etc/init.d/gl_clients start") > block.index("mount -t tmpfs")
+    # A single restart site after the mount/verify chain covers both
+    # the success and the failure path.
+    assert block.count("/etc/init.d/gl_clients start") == 1
+    assert "return $rc" in block
+    # The take-over is logged.
+    import re
+    assert re.search(r"logger[^\n]*gl_clients", block), "guard activation must be logged"
+
+
 def test_no_backslash_s_in_shell_files():
     r"""`\s` is a GNU-ism: in POSIX/musl ERE (OpenWrt busybox grep) it is
     undefined and busybox treats it as a literal 's'. The pool picker
