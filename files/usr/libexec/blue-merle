@@ -45,9 +45,9 @@ case "$1" in
         _resolve_tty_for_operation || { echo "No responsive modem TTY found" >&2; exit 1; }
         imei=$(READ_IMEI) || { echo "No IMEI found" >&2; exit 1; }
         imsi=$(READ_IMSI || true)
-        masked_imei="$(printf '%s' "$imei" | cut -c1-6)******$(printf '%s' "$imei" | cut -c13-)"
+        masked_imei=$(_mask_imei "$imei")
         if [ -n "$imsi" ]; then
-            masked_imsi="$(printf '%s' "$imsi" | cut -c1-5)******$(printf '%s' "$imsi" | cut -c12-)"
+            masked_imsi=$(_mask_imsi "$imsi")
         else
             masked_imsi=""
         fi
@@ -113,10 +113,11 @@ case "$1" in
             _safe_poweroff
             exit 1
         fi
-        # Same masked form as read-identifiers (first 6 + last 3
-        # digits), and only after every check above passed — never mask
-        # a failed read behind a pipeline (exit status would be sed's).
-        masked="$(printf '%s' "$new_imei" | cut -c1-6)******$(printf '%s' "$new_imei" | cut -c13-)"
+        # Canonical masked form via the shared helper (same as
+        # read-identifiers), and only after every check above passed —
+        # never mask a failed read behind a pipeline (the exit status
+        # would be the pipeline's, not READ_IMEI's).
+        masked=$(_mask_imei "$new_imei")
         printf '%s' "$masked"
         ;;
 

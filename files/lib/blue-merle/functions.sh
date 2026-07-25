@@ -112,6 +112,33 @@ _is_valid_imei_shape () {
     printf '%s\n' "$1" | grep -Eq '^[0-9]{15}$'
 }
 
+# Canonical masked forms for display/logging — one shape per identifier
+# class, used by every shipped surface (libexec RPC, diag carries its own
+# copies). Never print a full IMEI/IMSI.
+#
+# The IMSI form deliberately reveals MCC+MNC (first 5 digits), i.e. the
+# carrier: the router's own admin UI shows the carrier anyway, and the
+# subscriber-identifying tail stays masked. Fail-closed: anything that is
+# not a well-shaped identifier gets fully masked, so a misread or garbage
+# value can never leak more than the canonical form allows.
+_mask_imei () {
+    # 15-digit IMEI -> first6 + ****** + last3
+    case $1 in
+        *[!0-9]* | "") printf '***************\n'; return 1 ;;
+    esac
+    [ "${#1}" -eq 15 ] || { printf '***************\n'; return 1; }
+    printf '%s******%s\n' "$(printf '%s' "$1" | cut -c1-6)" "$(printf '%s' "$1" | cut -c13-)"
+}
+
+_mask_imsi () {
+    # 14/15-digit IMSI -> first5 + ****** + last4
+    case $1 in
+        *[!0-9]* | "") printf '***************\n'; return 1 ;;
+    esac
+    [ "${#1}" -ge 14 ] && [ "${#1}" -le 15 ] || { printf '***************\n'; return 1; }
+    printf '%s******%s\n' "$(printf '%s' "$1" | cut -c1-5)" "$(printf '%s' "$1" | cut -c$((${#1}-3))-)"
+}
+
 # Update integration files only when their backing storage is volatile.
 _write_runtime_imei () {
     local imei=$1 modem_dir wrote=0

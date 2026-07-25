@@ -176,8 +176,8 @@ def test_libexec_sim_swap_applies_stage2_invariants():
     # Regression: the old pipeline masked READ_IMEI's exit status behind
     # sed (always 0), so a failed readback reported a masked "success".
     assert "READ_IMEI | sed" not in block
-    # Mask form matches read-identifiers (cut-based), not the sed form.
-    assert "cut -c1-6" in block
+    # Mask via the shared canonical helper (same as read-identifiers).
+    assert '_mask_imei "$new_imei"' in block
     # Persistence must happen before the masked success output.
     assert block.index("_write_runtime_imei") < block.index('printf \'%s\' "$masked"')
 
@@ -213,7 +213,8 @@ def test_diag_script_is_versioned_and_masks_identifiers():
     # dist/ directory — untracked and easy to lose. It must stay under
     # version control, and it must mask every identifier class.
     diag = _read("tools/blue-merle-diag.sh")
-    assert "mask_id()" in diag
+    assert "mask_imei()" in diag
+    assert "mask_imsi()" in diag
     assert "mask_mac()" in diag
     assert "mask_name()" in diag
     # The removed model pool must not be probed anymore.

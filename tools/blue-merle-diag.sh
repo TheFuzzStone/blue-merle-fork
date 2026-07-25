@@ -5,8 +5,9 @@
 # repository. Copy to the device with:
 #   scp -O tools/blue-merle-diag.sh root@192.168.8.1:/tmp/
 #
-# All identifiers (IMEI/IMSI/serial/MAC) are masked before output so the
-# result is safe to paste into a chat / issue without leaking.
+# IMEI/IMSI are never read at all; other identifiers (MAC, hostname,
+# SSID, name-pool samples) are masked before output (canonical mask
+# forms), so the result is safe to paste into a chat / issue.
 #
 # The script writes the full report to /tmp/blue-merle-diag.out on the
 # Mudi (nothing is streamed to your terminal), so it survives long
@@ -36,16 +37,26 @@ exec >> "$OUT" 2>&1  # redirect all subsequent stdout+stderr to the file
 # ---- helpers (must be defined before the first section header
 #      so the report banner itself can mask sensitive fields) ----
 
-mask_id() {
-    # Show first 4 and last 4 chars, mask middle. Works for IMEI/IMSI.
+mask_imei() {
+    # Canonical IMEI form (same as _mask_imei in functions.sh):
+    # first6 + ****** + last3. Currently unused — the modem's IMEI is
+    # intentionally never read — but any future use must stay canonical.
     v=$1
-    n=${#v}
-    if [ "$n" -le 8 ]; then
-        printf '****\n'
+    if [ "${#v}" -eq 15 ]; then
+        printf '%s******%s\n' "$(printf '%s' "$v" | cut -c1-6)" "$(printf '%s' "$v" | cut -c13-)"
     else
-        head=$(printf '%s' "$v" | cut -c1-4)
-        tail=$(printf '%s' "$v" | cut -c$((n-3))-)
-        printf '%s******%s\n' "$head" "$tail"
+        printf '***************\n'
+    fi
+}
+
+mask_imsi() {
+    # Canonical IMSI form (same as _mask_imsi in functions.sh):
+    # first5 + ****** + last4 (deliberately reveals MCC+MNC = carrier).
+    v=$1
+    if [ "${#v}" -ge 14 ] && [ "${#v}" -le 15 ]; then
+        printf '%s******%s\n' "$(printf '%s' "$v" | cut -c1-5)" "$(printf '%s' "$v" | cut -c$((${#v}-3))-)"
+    else
+        printf '***************\n'
     fi
 }
 

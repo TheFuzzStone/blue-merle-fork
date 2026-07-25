@@ -115,6 +115,10 @@ real-world consequences.
 cd $SDK && make -j$(nproc) package/blue-merle/{clean,compile} V=s
 cp $SDK/bin/packages/mips_24kc/base/blue-merle_*.ipk ./dist/
 python3 tests/run_all.py   # all must pass
+# shellcheck (gated in CI; optional locally):
+# shellcheck -s sh -S warning $(find files/usr/bin files/usr/libexec \
+#   files/etc/init.d files/etc/hotplug.d files/etc/gl-switch.d -type f) \
+#   files/lib/blue-merle/functions.sh tools/blue-merle-diag.sh
 ```
 
 ## Sensitive files
