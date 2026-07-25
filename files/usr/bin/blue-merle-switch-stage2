@@ -88,7 +88,9 @@ elif [ -n "$old_imsi" ] && [ "$old_imsi" = "$new_imsi" ]; then
 fi
 
 mcu_send_message "Setting random  IMEI"
-if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r >/dev/null; then
+# stderr is discarded as defence in depth: the generator logs (masked)
+# values there, and the toggle chain has no safe stderr sink.
+if ! timeout 15 python3 /lib/blue-merle/imei_generate.py -r >/dev/null 2>/dev/null; then
 	mcu_send_message "ERROR:          IMEI change failed.       Reboot and retry."
 	sleep 5
 	_safe_poweroff

@@ -236,3 +236,66 @@ def test_exact_tac_env_selects_one_tac():
             del os.environ["BLUE_MERLE_TAC"]
         else:
             os.environ["BLUE_MERLE_TAC"] = old
+
+
+# ---- Logging hygiene ----
+
+def _run_main_fresh(argv: list[str], env_extra: dict[str, str]):
+    """Run a freshly imported imei_generate.main() with patched argv/env,
+    capturing stdout and (logging) stderr. Returns (rc, out, err)."""
+    import contextlib
+    import io
+    import logging
+
+    for mod_name in list(sys.modules):
+        if mod_name == "imei_generate":
+            del sys.modules[mod_name]
+    import imei_generate as fresh_m
+
+    # Reset root logging so basicConfig() inside main() re-initialises
+    # against THIS run's redirected stderr.
+    for h in list(logging.root.handlers):
+        logging.root.removeHandler(h)
+    logging.root.setLevel(logging.WARNING)
+
+    old_argv = sys.argv
+    sys.argv = argv
+    old_env = {k: os.environ.get(k) for k in env_extra}
+    os.environ.update(env_extra)
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = fresh_m.main()
+    finally:
+        sys.argv = old_argv
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return rc, out.getvalue(), err.getvalue()
+
+
+def test_generated_imei_never_reaches_stderr():
+    """Regression: main() used to log the full IMEI at INFO level, and
+    every non-interactive caller redirects only stdout — the value
+    leaked to terminals and (via the gl_switch chain) likely syslog.
+    stdout must still carry the full IMEI (that print() is the tool's
+    contract); stderr may only carry the masked form, at the default
+    level and with -v."""
+    for argv in (
+        ["imei_generate.py", "-r", "-g"],
+        ["imei_generate.py", "-r", "-g", "-v"],
+    ):
+        rc, out, err = _run_main_fresh(argv, {"BLUE_MERLE_TAC": "12345678"})
+        assert rc == 0, f"{argv}: rc={rc} err={err!r}"
+        imei = out.strip()
+        assert re.fullmatch(r"[0-9]{15}", imei), (
+            f"{argv}: stdout contract broken: {out!r}"
+        )
+        assert m.validate_imei(imei), f"{argv}: stdout IMEI not Luhn-valid"
+        assert imei not in err, f"{argv}: full IMEI on stderr: {err!r}"
+        assert imei[:14] not in err, f"{argv}: IMEI body on stderr: {err!r}"
+        assert imei[:8] not in err, f"{argv}: TAC on stderr: {err!r}"
+        masked = imei[:6] + "*" * 6 + imei[-3:]
+        assert masked in err, f"{argv}: masked form missing on stderr: {err!r}"

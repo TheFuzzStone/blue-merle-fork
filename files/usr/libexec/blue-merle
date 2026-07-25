@@ -87,7 +87,9 @@ case "$1" in
             sleep 1
         done
         sleep 2
-        if ! timeout 15 python3 /lib/blue-merle/imei_generate.py --random >/dev/null; then
+        # stderr is discarded as defence in depth: the generator logs
+        # (masked) values there; the LuCI JS drops stderr on success.
+        if ! timeout 15 python3 /lib/blue-merle/imei_generate.py --random >/dev/null 2>/dev/null; then
             echo "IMEI write failed; do NOT swap the SIM, retry or reboot to restore service" >&2
             exit 1
         fi

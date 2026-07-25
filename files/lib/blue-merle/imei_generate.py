@@ -20,6 +20,11 @@ Design notes / non-obvious fixes vs. the historical version:
 * ``get_imei`` / ``get_imsi`` retry a few times before giving up.
 * ``exit(1)`` on failure instead of ``exit(-1)`` (which POSIX turns into
   255 and confuses shell wrappers).
+* Log lines go to stderr, which non-interactive callers historically left
+  attached (terminal, gl_switch/syslog chain). They therefore never carry
+  a full IMEI/IMSI/TAC — values pass through ``_mask_id`` and raw modem
+  output through ``_scrub_at_output``. The full IMEI is only ever
+  emitted by ``print()`` on stdout: that is the tool's interface.
 """
 
 from __future__ import annotations
@@ -98,6 +103,37 @@ COMMAND_TIMEOUT = 5.0     # total wall-clock budget per AT command
 POST_EGMR_SETTLE = 1.0    # let the modem digest EGMR before we read GSN
 
 log = logging.getLogger("blue-merle.imei")
+
+
+def _mask_id(value) -> str:
+    """Log-safe masked form of an identifier (IMEI/IMSI/TAC).
+
+    Never returns more than the first 6 and last 3 characters — the
+    masked shape the LuCI RPC exposes for the IMEI — so nothing reaching
+    a log sink (stderr, terminal, syslog) can be correlated with an
+    operator's records. Short or empty values are fully masked.
+    """
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("ascii", "replace")
+    s = str(value).strip()
+    if not s:
+        return "<empty>"
+    if len(s) <= 9:
+        return "*" * len(s)
+    return s[:6] + "*" * (len(s) - 9) + s[-3:]
+
+
+def _scrub_at_output(raw: bytes) -> bytes:
+    """Mask every run of 6+ digits in raw modem output.
+
+    AT responses (and command echoes) contain the full IMEI/IMSI; debug
+    logs must show the response structure without the identifiers.
+    """
+    return re.sub(
+        rb"[0-9]{6,}",
+        lambda match: _mask_id(match.group(0)).encode("ascii"),
+        raw,
+    )
 
 
 def _read_at_response(ser: "serial.Serial", budget: float = COMMAND_TIMEOUT) -> bytes:
@@ -180,7 +216,7 @@ def get_imsi(tty: str = DEFAULT_TTY, retries: int = 3) -> bytes:
             log.warning("Serial error while reading IMSI: %s", exc)
             time.sleep(1)
             continue
-        log.debug("AT+CIMI raw output: %r", output)
+        log.debug("AT+CIMI raw output: %r", _scrub_at_output(output))
         # IMSI is 14-15 digits per ITU-T E.212. Take the first match.
         candidates = re.findall(rb"[0-9]{14,15}", output)
         if candidates:
@@ -200,7 +236,7 @@ def get_imei(tty: str = DEFAULT_TTY, retries: int = 3) -> bytes:
             log.warning("Serial error while reading IMEI: %s", exc)
             time.sleep(1)
             continue
-        log.debug("AT+GSN raw output: %r", output)
+        log.debug("AT+GSN raw output: %r", _scrub_at_output(output))
         candidates = re.findall(rb"[0-9]{15}", output)
         if candidates:
             return candidates[0]
@@ -222,7 +258,7 @@ def set_imei(imei: str, tty: str = DEFAULT_TTY) -> bool:
         log.error("Serial error while writing IMEI: %s", exc)
         return False
 
-    log.debug("AT+EGMR raw output: %r", output)
+    log.debug("AT+EGMR raw output: %r", _scrub_at_output(output))
 
     # Some Quectel firmwares need a beat to commit EGMR before AT+GSN reflects
     # the new value; without this we get spurious "IMEI not changed" reports.
@@ -233,8 +269,8 @@ def set_imei(imei: str, tty: str = DEFAULT_TTY) -> bool:
         log.info("IMEI has been successfully changed.")
         return True
     log.error(
-        "IMEI change verification failed. Modem reports %r, wanted %r.",
-        new_imei, imei,
+        "IMEI change verification failed. Modem reports %s, wanted %s.",
+        _mask_id(new_imei), _mask_id(imei),
     )
     return False
 
@@ -282,7 +318,7 @@ def generate_imei(tac_list: Iterable[str], imsi_seed: Optional[bytes]) -> str:
         rng.seed(int.from_bytes(digest, "big"))
 
     tac = rng.choice(list(tac_list))
-    log.debug("TAC (first 8 digits): %s", tac)
+    log.debug("TAC (first 8 digits): %s", _mask_id(tac))
 
     tail_length = IMEI_BODY_LENGTH - len(tac)
     # random.choices samples *with* replacement so each digit is uniform
@@ -291,10 +327,10 @@ def generate_imei(tac_list: Iterable[str], imsi_seed: Optional[bytes]) -> str:
     # digits — a statistical fingerprint of the tool itself.
     tail = "".join(rng.choices(string.digits, k=tail_length))
     body = tac + tail
-    log.debug("IMEI without check digit: %s", body)
+    log.debug("IMEI without check digit: %s", _mask_id(body))
 
     imei = body + str(_luhn_check_digit(body))
-    log.debug("Resulting IMEI: %s", imei)
+    log.debug("Resulting IMEI: %s", _mask_id(imei))
     return imei
 
 
@@ -306,14 +342,14 @@ def validate_imei(imei: str) -> bool:
     We now accept the standards-compliant 15-char form only.
     """
     if len(imei) != 15 or not imei.isdigit():
-        log.error("NOT A VALID IMEI: %r — must be 15 digits", imei)
+        log.error("NOT A VALID IMEI: %s — must be 15 digits", _mask_id(imei))
         return False
     body, expected = imei[:14], int(imei[14])
     got = _luhn_check_digit(body)
     if got != expected:
-        log.error("NOT A VALID IMEI: %s — Luhn check %d != %d", imei, got, expected)
+        log.error("NOT A VALID IMEI: %s — Luhn check %d != %d", _mask_id(imei), got, expected)
         return False
-    log.info("%s is CORRECT", imei)
+    log.info("%s is CORRECT", _mask_id(imei))
     return True
 
 
@@ -377,7 +413,7 @@ def main() -> int:
 
     tac_list = _load_tac_list()
     imei = generate_imei(tac_list, imsi_seed)
-    log.info("Generated new IMEI: %s", imei)
+    log.info("Generated new IMEI: %s", _mask_id(imei))
     if not args.generate_only and not set_imei(imei):
         return 1
     print(imei)

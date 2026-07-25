@@ -330,3 +330,74 @@ def test_tac_lists_do_not_ship_unverified_values():
             for line in _read(path).splitlines()
         ]
         assert not [line for line in lines if line], path
+
+
+def test_imei_generate_log_calls_mask_identifiers():
+    """A log.* call must never receive a raw identifier value.
+
+    The script's stdout is the interface (callers capture the printed
+    IMEI); every log line goes to stderr, which non-interactive callers
+    historically left attached — a full IMEI there lands on terminals
+    and likely in syslog via the gl_switch daemon chain. Identifier-
+    bearing values (IMEI, IMSI, TAC, raw AT output) may only reach a
+    log call wrapped in _mask_id()/_scrub_at_output().
+    """
+    import ast
+
+    carriers = {
+        "imei", "new_imei", "old_imei", "current_imei", "body", "tail",
+        "tac", "output", "imsi", "imsi_seed", "candidates", "cmd",
+    }
+    wrappers = {"_mask_id", "_scrub_at_output", "len"}
+    tree = ast.parse(_read("files/lib/blue-merle/imei_generate.py"))
+    violations = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "log"
+        ):
+            continue
+        for arg in list(node.args) + [kw.value for kw in node.keywords]:
+            if (
+                isinstance(arg, ast.Call)
+                and isinstance(arg.func, ast.Name)
+                and arg.func.id in wrappers
+            ):
+                continue
+            for sub in ast.walk(arg):
+                if isinstance(sub, ast.Name) and sub.id in carriers:
+                    violations.append(f"line {node.lineno}: raw {sub.id!r}")
+                if (
+                    isinstance(sub, ast.Attribute)
+                    and sub.attr == "static"
+                    and isinstance(sub.value, ast.Name)
+                    and sub.value.id == "args"
+                ):
+                    violations.append(f"line {node.lineno}: raw 'args.static'")
+    assert not violations, (
+        "unmasked identifier(s) in log call(s): " + "; ".join(violations)
+    )
+
+
+def test_noninteractive_imei_generate_calls_discard_stderr():
+    """stage1/stage2/libexec capture stdout (the tool's contract) but
+    must also discard stderr: the generator's log lines go there and
+    the toggle/LuCI chains have no safe stderr sink (the gl_switch
+    daemon's child stderr likely lands in syslog; fs.exec drops it).
+    Defence in depth even though the log calls themselves mask
+    identifiers."""
+    for path in (
+        "files/usr/bin/blue-merle-switch-stage1",
+        "files/usr/bin/blue-merle-switch-stage2",
+        "files/usr/libexec/blue-merle",
+    ):
+        for lineno, line in enumerate(_read(path).splitlines(), 1):
+            if "imei_generate.py" not in line or "python3" not in line:
+                continue  # prose comments mentioning the script
+            assert "2>/dev/null" in line, f"{path}:{lineno}: {line.strip()}"
+
+
