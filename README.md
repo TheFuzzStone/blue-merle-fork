@@ -109,7 +109,7 @@ make -j"$(nproc)" package/blue-merle/compile V=s
 
 Monero (XMR):
 
-`88P6A1KHRhL6WxnMAUf2RF8q3kSMLrV1mZoojap8bXkxhaP14yqVzHyBRfgKTMB9rRFpv9C6raq1e9fp1pVUC2dEEzod6aA`
+`835zUaFETfmc3q5UtUCTvNUD8Z7mfPUztDYpN8bbq7PpUute1qGqDiHgGKENCHGP3YDKEmHmgdXLf4umLmfDyXjaDxcPkNf`
 
 Bitcoin (Lightning):
 
