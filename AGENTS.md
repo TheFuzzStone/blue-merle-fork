@@ -19,15 +19,17 @@ machine, shared modem lock.
 
 ## Current status (handoff, 2026-07-25 — session closed)
 
-Everything is merged and PUSHED: `origin/main @ 88053ff` (`034203c` →
-step series `7bc0560..b9405f4` → docs refresh `88053ff`). 97 unit
-tests + CI's `sh -n` set + shellcheck `-s sh -S warning` all green;
-every step-series commit individually verified green in a worktree.
+Everything is merged and PUSHED: `origin/main @ f5e7173` (`034203c` →
+step series `7bc0560..b9405f4` → docs/cleanup `88053ff..f5e7173`).
+98 unit tests + CI's `sh -n` set + shellcheck `-s sh -S warning` all
+green; every step-series commit individually verified green in a
+worktree.
 
 Build: `dist/blue-merle_3.0.5-local-28_mips_24kc.ipk` (from `88053ff`,
 content-audited, SHA256SUMS updated) is the ONLY build to flash;
-local-19 predates the session. The package builds
-without `feeds update` (SDK volatile — re-download per README).
+local-19 predates the session and was pruned. Published as GitHub
+Release `v3.0.5-local` (ipk + SHA256SUMS, 2026-07-25). The package
+builds without `feeds update` (SDK volatile — re-download per README).
 
 ### Session workflow (conventions that proved themselves)
 
@@ -57,11 +59,6 @@ without `feeds update` (SDK volatile — re-download per README).
    fails; (d) optional `blue-merle-tac info` CLI.
 3. **DHCP fingerprinting** (udhcpc PRL/options vs iOS) — research +
    hardware.
-4. Housekeeping: GitHub Release with the local-28 ipk + EN release
-   note (drafted 2026-07-25); decide fate of `dist/local-19`; delete
-   local branches `hardening-p0`, `p0-libexec-hardening`, `tac-filter`;
-   optional symmetric gl_clients guard in `volatile-client-macs stop()`;
-   confirm CI green on the pushed commits.
 
 ### Session log 2026-07-25 (steps 1-7)
 
@@ -80,6 +77,10 @@ without `feeds update` (SDK volatile — re-download per README).
   pin, CI no longer runs `feeds update`.
 - `b9405f4` — repo hygiene (real-ESSID diag log deleted, stale ipk
   pruned); `88053ff` — README/USAGE refreshed and compressed.
+- `c053a5a`/`f5e7173` — TODO.md merged into this file (RU docs
+  dropped), vcm `stop()` gl_clients guard, branches + local-19 pruned.
+  User decision: GitHub Actions dropped from the plan entirely
+  (2026-07-25) — do not re-propose CI work.
 
 ## Rules
 
