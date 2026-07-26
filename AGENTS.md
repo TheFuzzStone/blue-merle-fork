@@ -17,7 +17,67 @@ phone is user-supplied, fail-closed), `stable_identity` UCI option, per-uplink
 MAC rotation, tmpfs for `/root/esim` and `/etc/oui-tertf`, fail-closed state
 machine, shared modem lock.
 
-## Current status (handoff, 2026-07-25 — hardware session, SIM items pending)
+## Current status (handoff, 2026-07-26 — repeater-drop investigated live, queue #1 reinforced)
+
+`main` = `3bdbde5` (docs: opkg-update install lines) + this handoff
+commit on top — PUSHED, in sync with origin. History: `691167e`
+(queue re-prioritisation) rebased onto origin's two README-donation
+commits. Working tree clean; 107/107 tests + `sh -n` green.
+
+**Where the session stopped (2026-07-26):** queue #1 (volatile uplink
+history) is at the DECISION point — user was shown options A (tmpfs
+/etc/config + persist-list), B (purge: auto-trim history to current
+network on join + forget-all CLI + bssid scrub), C (B default + UCI
+switch for A), D (nothing). Recommendation given: B first, A later as
+an opt-in switch. First step once the user picks: 5-min hardware
+experiment — delete a `/etc/config/repeater` network entry, then
+`ubus call repeater save_config` + reboot, check whether GL's
+(obfuscated) repeater binary re-materialises deleted entries from RAM.
+That answer decides the hook design. Key design catch already made:
+trim must run ONLY on join events (never at boot with no uplink —
+that would wipe all saved networks on every offline boot).
+
+GitHub Release `v3.0.5-local` was RE-ISSUED by the user (2026-07-26)
+as local-33 ("hardware-validation hotfix"; assets ipk + SHA256SUMS) —
+the "release still carries local-28" note below is history. Docs bug
+found the same day via a user report: install lines missing
+`opkg update` (opkg lists live in RAM, wiped every reboot →
+`pkg_hash_check_unresolved` for python3-logging/urllib on fresh
+systems; NOT a signature check — if forced, imei_generate dies
+ModuleNotFoundError → fail-closed poweroff mid-swap). Fixed in
+README/USAGE (uncommitted); release body needs the same line.
+
+**Device state CHANGED 2026-07-26:** SIM present (MCC 268 / MNC 6,
+LTE up, data-call flaky but lease held). Uplink = repeater to the
+user's home AP (SSID deliberately unrecorded — do not write network
+names into this file; wlan-sta0, 5 GHz ch36 — SAME phy0 as the AP) +
+LTE backup via mwan3. User chose to leave it this way. Modem IMEI
+unchanged `868186******309`. `wireless.sta` now exists on NAND.
+
+**Repeater-join drop — explained and measured (2026-07-26):**
+joining a new upstream drops AP clients exactly once, ~22 s. GL's
+repeater cannot add a sta beside a running AP: it tears down the whole
+phy and rebuilds it as AP+STA (hostapd `Remove interface 'wlan1'` →
+`new PHY` → ath10k fw re-init ~5 s → sta associates → AP back → client
+re-associates → DHCP). The teardown happens only when `wireless.sta`
+is (re)created, i.e. per NEW network; the 17 s scan phase before it
+does NOT drop clients (two 0.3 s micro-losses); reconnects to an
+already-known network don't rebuild → no drop. Verified with 0.2 s
+ping from the laptop + logread timeline. Cosmetic: the laptop came
+back with a fresh NM-private MAC and a new DHCP lease (old IP got
+DHCPNAK "address in use"). GL's `/usr/sbin/repeater` is obfuscated Lua
+bytecode (little-endian, bogus integral flag — stock luadec can't read
+it; `strings` + live logs are the way).
+
+**Queue #1 reinforced by live evidence:** ONE join writes TWO
+persistent movement logs: `wireless.sta` (SSID + BSSID + plaintext
+key + encryption) AND `/etc/config/repeater` (history of 3 saved
+networks with keys). Both survive reboot. Our hooks correctly did NOT
+fire during the join (no ifdown wwan/wan; phy teardown emits no
+`wlan*` ifdown hotplug event) — AP BSSID stayed stable across it;
+repeater re-read macclone_addr into sta.macaddr as documented.
+
+### Handoff 2026-07-25 — hardware session, SIM items pending
 
 `origin/main @ c3ec9ad` — all three hardware fixes committed and
 pushed. **`dist/blue-merle_3.0.5-local-33_mips_24kc.ipk` is THE build
@@ -88,12 +148,6 @@ Minor findings (no fix yet):
 - Guest SSIDs keep factory `GL-E750-a19-Guest` (both disabled).
 - ifup after manual ifdown takes ~20-30 s (netifd retry cycle: "link
   connectivity loss" → recover) — platform behaviour, not ours.
-
-Everything before this session is merged and PUSHED: `origin/main @
-f5e7173` (`034203c` → step series `7bc0560..b9405f4` → docs/cleanup
-`88053ff..f5e7173`). 98 unit tests + CI's `sh -n` set + shellcheck
-`-s sh -S warning` all green; every step-series commit individually
-verified green in a worktree.
 
 Everything before this session is merged and PUSHED: `origin/main @
 f5e7173` (`034203c` → step series `7bc0560..b9405f4` → docs/cleanup
