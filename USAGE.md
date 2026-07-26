@@ -9,7 +9,9 @@ Download from [Releases](../../releases), then:
 
 ```sh
 scp -O blue-merle_*.ipk root@192.168.8.1:/tmp/
-ssh root@192.168.8.1 'opkg install --force-reinstall /tmp/blue-merle_*.ipk && reboot'
+ssh root@192.168.8.1 'opkg update && opkg install --force-reinstall /tmp/blue-merle_*.ipk && reboot'
+# opkg update is required: package lists live in RAM (lost every reboot),
+# without it the python3-logging/urllib deps fail to resolve
 # after reboot: new SSID (e.g. Emma's iPhone), same WiFi password
 ```
 

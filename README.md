@@ -20,8 +20,12 @@ Download from [Releases](../../releases), verify the checksum, then:
 
 ```sh
 scp -O blue-merle_3.0.5-local-*.ipk root@192.168.8.1:/tmp/
-ssh root@192.168.8.1 'opkg install --force-reinstall /tmp/blue-merle_*.ipk && reboot'
+ssh root@192.168.8.1 'opkg update && opkg install --force-reinstall /tmp/blue-merle_*.ipk && reboot'
 ```
+
+`opkg update` is mandatory: package lists live in RAM and are wiped every
+reboot — without it the `python3-logging`/`python3-urllib` deps fail to
+resolve (`pkg_hash_check_unresolved`).
 
 After reboot the WiFi name changes (e.g. `GL-E750-a19` → `Emma's iPhone`).
 Reconnect with the **same password** — it never rotates.
