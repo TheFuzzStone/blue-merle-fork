@@ -45,7 +45,8 @@ found the same day via a user report: install lines missing
 `pkg_hash_check_unresolved` for python3-logging/urllib on fresh
 systems; NOT a signature check — if forced, imei_generate dies
 ModuleNotFoundError → fail-closed poweroff mid-swap). Fixed in
-README/USAGE (uncommitted); release body needs the same line.
+README/USAGE (`3bdbde5`, pushed); release body updated by the user
+the same day (verified via GitHub API).
 
 **Device state CHANGED 2026-07-26:** SIM present (MCC 268 / MNC 6,
 LTE up, data-call flaky but lease held). Uplink = repeater to the
@@ -176,11 +177,12 @@ the toggle/CLI paths. The package builds without `feeds update`
 
 ### Queue (priority order)
 
-0. **Hardware testing on the Mudi — BLOCKED on 2 physical SIM cards**
-   (user will buy): toggle flow (= the MCU pagination test) → CLI →
-   anti-forensics → uninstall. The full step-by-step lives in
-   `SIM-SESSION-CHECKLIST.md` (gitignored, on the user's machine).
-   Everything automatable was done 2026-07-25 (see Current status).
+0. **Hardware testing on the Mudi — BLOCKED on a 2nd SIM card**
+   (1 of 2 arrived 2026-07-26, one more needed): toggle flow (= the
+   MCU pagination test) → CLI → anti-forensics → uninstall. The full
+   step-by-step lives in `SIM-SESSION-CHECKLIST.md` (gitignored, on
+   the user's machine). Everything automatable was done 2026-07-25
+   (see Current status).
 
 **Top-4 (do in this order — all seen first-hand on hardware):**
 
